@@ -20,7 +20,7 @@ import logging
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_dir",default='345M_after_Alex',type=str,required=False,
+    parser.add_argument("--model_dir",default='345M_Alex',type=str,required=False,
                         help="The directory of the model to be tuned.")
     parser.add_argument("--output_dir", default='mi_tuned', type=str, required=False,
                         help="The output directory where the model predictions and checkpoints will be written.")
@@ -63,12 +63,12 @@ def main():
     # folder = '../data_processed/'
     # x_flat = pickle.load(open(folder+'x_flat','rb'))
     # y_all_join = pickle.load(open(folder+'y_all_join','rb'))
-    pickle_handler = open('/data/chuancen/LIT/data_processed/x_y_meta','rb')
+    pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/x_y_meta','rb')
     x_y_meta = pickle.load(pickle_handler)
-    gpt_data = GptDataset(x_y_meta,tokenizer)
+    gpt_data = GptDataset(x_y_meta,tokenizer,args.output_dir) # use the output model name as pattern name
     print("Dataset initialized.")
 
-    test_size  = int(len(gpt_data)*0.05)
+    test_size  = int(len(gpt_data)*0.10)
     val_size = int(len(gpt_data)*0.05)
     gpt_train,gpt_test,gpt_val = torch.utils.data.random_split(gpt_data,[len(gpt_data)-test_size-val_size,test_size,val_size])
 
@@ -83,7 +83,7 @@ def main():
         {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
         ]
 
-    num_train_optimization_steps = len(gpt_data) * args.num_train_epochs // args.train_batch_size
+    num_train_optimization_steps = len(gpt_train) * args.num_train_epochs // args.train_batch_size
     num_warmup_steps = int(num_train_optimization_steps * 0.1)
     warm_up_proportion = float(num_warmup_steps) / float(num_train_optimization_steps)
 
@@ -109,7 +109,6 @@ def main():
                 break
             # counter+=1
             # print("Get data")
-            # pdb.set_trace()
             loss = model(x, position_ids=pos_x, token_type_ids=type_x, labels=lm_x)[0]
             # print("Forward pass")
             # loss.backward(torch.ones(2).cuda())

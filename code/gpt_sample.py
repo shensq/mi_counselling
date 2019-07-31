@@ -14,6 +14,8 @@ from torch.autograd import Variable
 from tqdm import tqdm, trange
 from pytorch_transformers import GPT2LMHeadModel, GPT2Tokenizer
 from rouge import Rouge 
+from utils import clean_text,text_standardize
+from gpt_loader import GptDataset,collate_fn
 
 USE_CUDA = torch.cuda.is_available()
 FloatTensor = torch.cuda.FloatTensor if USE_CUDA else torch.FloatTensor
@@ -23,147 +25,6 @@ logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(messa
                     datefmt = '%m/%d/%Y %H:%M:%S',
                     level = logging.INFO)
 logger = logging.getLogger(__name__)
-
-#============Duplicate code ==============
-
-# ==== Code for data loading =====
-class GptDataset(Dataset):
-    # need 3 special tokens
-    # # as <ref start> 2
-    # $ as <speaker1> 3
-    # % as <speaker2> 4
-    # '<|endoftext|>' as <eos> 50256
-    def __init__(self,x_encoded,y_encoded,num_turns=5):
-        self.x_encoded = x_encoded
-        self.y_encoded = y_encoded
-
-        self.num_turns = num_turns
-        
-    def __getitem__(self,index):
-        type_x = []
-        x = []
-        lm_x = []
-
-        ref_start, speaker1,speaker2,eos = 2,3,4,50256
-        x += [speaker1] + self.x_encoded[index*self.num_turns]
-        type_x += [speaker1]*(len(self.x_encoded[index*self.num_turns])+1)
-        
-        x += [speaker2] + self.x_encoded[index*self.num_turns+1]
-        type_x += [speaker2]*(len(self.x_encoded[index*self.num_turns+1])+1)
-        
-        x += [speaker1] + self.x_encoded[index*self.num_turns+2]
-        type_x += [speaker1]*(len(self.x_encoded[index*self.num_turns+2])+1)
-        
-        x += [speaker2] + self.x_encoded[index*self.num_turns+3]
-        type_x += [speaker2]*(len(self.x_encoded[index*self.num_turns+3])+1)
-        
-        x += [speaker1] + self.x_encoded[index*self.num_turns+4]
-        type_x += [speaker1]*(len(self.x_encoded[index*self.num_turns+4])+1)
-        lm_x += [-1]*len(x)
-        
-        total_input_length = len(x)
-        
-        x += [ref_start] + self.y_encoded[index] + [50256]
-        type_x += [ref_start]*(len(self.y_encoded[index])+2)
-        lm_x += [-1] + self.y_encoded[index] + [-1]
-        
-        position_x = list(range(len(x)))
-        
-        x = torch.Tensor(x)
-        type_x = torch.Tensor(type_x)
-        position_x = torch.Tensor(position_x)
-        lm_x = torch.Tensor(lm_x)
-        x_len = x.shape[0]
-        
-        return x,type_x,position_x,lm_x,total_input_length
-
-    def __len__(self):
-        return len(self.y_encoded)
-
-def collate_fn(data):
-    """Creates mini-batch tensors from the list of tuples (src_seq, trg_seq).
-    We should build a custom collate_fn rather than using default collate_fn,
-    because merging sequences (including padding) is not supported in default.
-    Seqeuences are padded to the maximum length of mini-batch sequences (dynamic padding).
-    Args:
-        data: list of tuple (src_seq, trg_seq).
-            - src_seq: torch tensor of shape (?); variable length.
-            - trg_seq: torch tensor of shape (?); variable length.
-    Returns:
-        src_seqs: torch tensor of shape (batch_size, padded_length).
-        src_lengths: list of length (batch_size); valid length for each padded source sequence.
-        trg_seqs: torch tensor of shape (batch_size, padded_length).
-        trg_lengths: list of length (batch_size); valid length for each padded target sequence.
-    """
-    def merge(sequences):
-        lengths = [len(seq) for seq in sequences]
-        padded_seqs = torch.zeros(len(sequences), max(lengths)).long()
-        for i, seq in enumerate(sequences):
-            end = lengths[i]
-            padded_seqs[i, :end] = seq[:end]
-        return padded_seqs, lengths
-
-    # sort a list by sequence length (descending order) to use pack_padded_sequence
-    data.sort(key=lambda x: len(x[0]), reverse=True)
-
-    # seperate source and target sequences
-    src_seqs, trg_seqs, pos_seqs,lm_seqs = zip(*data)
-
-    # merge sequences (from tuple of 1D tensor to 2D tensor)
-    src_seqs, src_lengths = merge(src_seqs)
-    trg_seqs, trg_lengths = merge(trg_seqs)
-    pos_seqs, pos_lengths = merge(pos_seqs)
-    lm_seqs, lm_lengths = merge(lm_seqs)
-    if USE_CUDA:
-        src_seqs = src_seqs.cuda()
-        trg_seqs = trg_seqs.cuda()
-        pos_seqs = pos_seqs.cuda()
-        lm_seqs = lm_seqs.cuda()
-    return Variable(LongTensor(src_seqs)), Variable(LongTensor(trg_seqs)), Variable(LongTensor(pos_seqs)),Variable(LongTensor(lm_seqs)),  src_lengths
-
-def text_standardize(text):
-    """
-    fixes some issues the spacy tokenizer had on books corpus
-    also does some whitespace standardization
-    """
-    text = text.replace('—', '-')
-    text = text.replace('–', '-')
-    text = text.replace('―', '-')
-    text = text.replace('…', '...')
-    text = text.replace('´', "'")
-    text = text.replace('’',"'")
-    text = text.replace('‘',"")
-    text = text.replace('”',"\"")
-    text = text.replace('“',"\"")
-    text = re.sub(r'''(-+|~+|!+|"+|;+|\?+|\++|,+|\)+|\(+|\\+|\/+|\*+|\[+|\]+|}+|{+|\|+|_+)''', r' \1 ', text)
-    text = re.sub(r'\s*\n\s*', ' \n ', text)
-    text = re.sub(r'[^\S\n]+', ' ', text)
-    return text.strip()
-
-def clean_text(text):
-    text = text.lower()
-    text = re.sub("[’]","\'",text)
-    text = re.sub("it's", "it is", text)
-    text = re.sub("i'm", "i am", text)
-    text = re.sub("he's", "he is", text)
-    text = re.sub("she's", "she is", text)
-    text = re.sub("that's", "that is", text)
-    text = re.sub("what's", "what is", text)
-    text = re.sub("where's", "where is", text)
-    text = re.sub("he's", "he is", text)
-    text = re.sub("\'s", " \'s",text)
-    text = re.sub("\'ll", " will", text)
-    text = re.sub("\'ve", " have", text)
-    text = re.sub("\'re", " are", text)
-    text = re.sub("\'d", " would", text)
-    text = re.sub("\'re", " are", text)
-    text = re.sub("don't", "do not", text)
-    text = re.sub("won't", "will not", text)
-    text = re.sub("can't", "can not", text)
-    return text
-
-#=========================================
-
 
 def top_k_logits(logits, k):
     """
@@ -178,21 +39,40 @@ def top_k_logits(logits, k):
         batch_mins = values[:, -1].view(-1, 1).expand_as(logits)
         return torch.where(logits < batch_mins, torch.ones_like(logits) * -1e10, logits)
 
-def sample_sequence(model, length, start_token=None, batch_size=None, context=None, temperature=1, top_k=0, device='cuda', sample=True):
+def get_topic_keywords(meta):
+    # TODO: temperary function
+    keywords_up = []
+    keywords_down = []
+    if meta[1]=='Weight management':
+        keywords_up += [6551, 4483, 2057, 9799, 4425, 4461, 4255, 5517]
+        keywords_down += [46040, 21856, 2526, 13230, 7523, 15220]
+    if meta[1]=='Smoking cessation':
+        keywords_up += [46040, 21856, 2526, 13230, 7523, 15220]
+        keywords_down += [6551, 4483, 2057, 9799, 4425, 4461, 4255, 5517]
+    return keywords_up, keywords_down
+
+def sample_sequence(model, length, start_token=None, batch_size=None, context=None, temperature=1, top_k=0, device='cuda', sample=True,meta=None):
     if start_token is None:
         assert context is not None, 'Specify exactly one of start_token and context!'
         context = torch.tensor(context, device=device, dtype=torch.long).unsqueeze(0).repeat(batch_size, 1)
     else:
         assert context is None, 'Specify exactly one of start_token and context!'
         context = torch.full((batch_size, 1), start_token, device=device, dtype=torch.long)
+
+    keywords_up, keywords_down = get_topic_keywords(meta)
     prev = context
     output = context
     past = None
     with torch.no_grad():
         for i in trange(length):
             logits, past = model(prev, past=past)
-            logits = logits[:, -1, :] / temperature
-            logits = top_k_logits(logits, k=top_k)
+            logits = logits[:, -1, :] / temperature # torch.Size([1, 50257])
+            #===
+            # logits[0][keywords_down]*=1.2 # multiply, lower logit, lower prob
+            logits[0][keywords_down]-= 100 # eliminate undesired word 
+            # logits[0][keywords_up]/=1.2
+            #===
+            logits = top_k_logits(logits, k=top_k) 
             log_probs = F.softmax(logits, dim=-1)
             if sample:
                 prev = torch.multinomial(log_probs, num_samples=1)
@@ -234,26 +114,16 @@ def run_model():
     tokenizer = GPT2Tokenizer.from_pretrained(model_dir)
 
     # =============== Load & process data ==============
-    # folder = '/home/shensq/gpt_tuning/multiturns_data/'
-    folder = '/data/chuancen/LIT/data_processed/'
-    x_flat = pickle.load(open(folder+'x_flat','rb'))
-    y_all_join = pickle.load(open(folder+'y_all_join','rb'))
-
-    x_encoded = [tokenizer.encode(text_standardize(x)) for x in x_flat]
-    y_encoded = [tokenizer.encode(text_standardize(y)) for y in y_all_join]
-    # y_cleaned = [clean_text(y) for y in y_all_join]
-    # y_encoded = [tokenizer.convert_tokens_to_ids(y.split()) for y in y_cleaned]
-
-    # x_cleaned = [clean_text(x) for x in x_flat]
-    # x_encoded = [tokenizer.convert_tokens_to_ids(x.split()) for x in x_cleaned]
-
-    gpt_data = GptDataset(x_encoded,y_encoded)
-    test_size  = int(len(gpt_data)*0.05)
+    pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/x_y_meta','rb')
+    x_y_meta = pickle.load(pickle_handler)
+    gpt_data = GptDataset(x_y_meta,tokenizer,args.output_dir) # use the name of output, it is depend on how is the trained model
+    print("Dataset initialized.")
+    test_size  = int(len(gpt_data)*0.10)
     val_size = int(len(gpt_data)*0.05)
     gpt_train,gpt_test,gpt_val = torch.utils.data.random_split(gpt_data,[len(gpt_data)-test_size-val_size,test_size,val_size])
 
     # data_loader = DataLoader(dataset=gpt_train,batch_size=args.train_batch_size,shuffle=True,drop_last=True,collate_fn=collate_fn)
-    test_loader = DataLoader(dataset=gpt_test,batch_size=args.batch_size,shuffle=True,drop_last=True)
+    test_loader = DataLoader(dataset=gpt_test,batch_size=args.batch_size,shuffle=True,drop_last=True,collate_fn=collate_fn)
 # ====
 
     model.eval()
@@ -262,28 +132,28 @@ def run_model():
         args.length = model.config.n_ctx // 2
     elif args.length > model.config.n_ctx:
         raise ValueError("Can't get samples longer than window size: %s" % model.config.n_ctx)
-    
-    # import pdb;pdb.set_trace()
 
     # f = open('../result/generated_sample5.txt','w')
     hyp = []
     ref = []
 
     f = open('../result/'+args.output_dir+'.txt','w')
-    f_ref = open('../result/reference.txt','w')
+    f_ref = open('../result/reference_'+args.output_dir+'.txt','w')
     counter=0
-    for x,type_x,pos_x,lm_x,input_len in test_loader:
-        if counter>10:
+    for x,type_x,pos_x,lm_x,input_len,*meta in test_loader:
+        input_len = input_len[0]
+        if counter>1000:
             break
         counter+=1
         print(counter)
         # f.write('='*5+'INPUT'+str(counter)+'='*5+'\n')
         # f.write(tokenizer.decode(x[0].tolist()[:input_len]))
         # f.write('\n')
-        print('='*5+'INPUT'+str(counter)+'='*5+'\n')
-        print(tokenizer.decode(x[0].tolist()[:input_len]))
-        print('='*5+'GROUND'+str(counter)+'='*5+'\n')
-        print(tokenizer.decode(x[0].tolist()[input_len:]))
+
+        # print('='*5+'INPUT'+str(counter)+'='*5+'\n')
+        # print(tokenizer.decode(x[0].tolist()[:input_len]))
+        # print('='*5+'GROUND'+str(counter)+'='*5+'\n')
+        # print(tokenizer.decode(x[0].tolist()[input_len:]))
         context_tokens = x[0][:input_len+1] # at evaluation stage, the input is without the ground truth
         generated = 0
         for i in range(args.nsamples // args.batch_size):
@@ -294,7 +164,7 @@ def run_model():
                 context=context_tokens,
                 start_token=None,
                 batch_size=args.batch_size,
-                temperature=args.temperature, top_k=args.top_k, device=device
+                temperature=args.temperature, top_k=args.top_k, device=device,meta=meta[0][0] # an extra index for *meta
             )
             
             out = out[:, len(context_tokens):].tolist() # the generated result
@@ -307,8 +177,8 @@ def run_model():
             hyp.append(tokenizer.decode(out[0]))
             f.write(tokenizer.decode(out[0]))
             f.write('\n')
-            print('='*5+'OUTPUT'+str(counter)+'='*5+'\n')
-            print(tokenizer.decode(out[0]))
+            # print('='*5+'OUTPUT'+str(counter)+'='*5+'\n')
+            # print(tokenizer.decode(out[0]))
     f.close()
     f_ref.close()
             # for i in range(args.batch_size):
@@ -316,7 +186,7 @@ def run_model():
             #     text = tokenizer.decode(out[i])
             #     print("=" * 40 + " SAMPLE " + str(generated) + " " + "=" * 40)
             #     print(text)
-    with open('result.txt','a') as f_result:
+    with open('../result/rouge.txt','a') as f_result:
         rouge = Rouge()
         scores = rouge.get_scores(hyp, ref,avg=True)
         print("ROUGE",scores)
