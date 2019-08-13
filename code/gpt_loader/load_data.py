@@ -1,7 +1,10 @@
 import torch
 from torch.utils.data import Dataset,DataLoader
 from torch.autograd import Variable
+import json
+import random
 import sys
+from tqdm import tqdm
 sys.path.append("..")
 from utils import text_standardize
 
@@ -133,3 +136,161 @@ def collate_fn(data):
         pos_seqs = pos_seqs.cuda()
         lm_seqs = lm_seqs.cuda()
     return Variable(LongTensor(src_seqs)), Variable(LongTensor(trg_seqs)), Variable(LongTensor(pos_seqs)),Variable(LongTensor(lm_seqs)), total_input_length, meta
+
+def collate_fn_nli(data):
+    """Creates mini-batch tensors from the list of tuples (src_seq, trg_seq).
+    We should build a custom collate_fn rather than using default collate_fn,
+    because merging sequences (including padding) is not supported in default.
+    Seqeuences are padded to the maximum length of mini-batch sequences (dynamic padding).
+    Args:
+        data: list of tuple (src_seq, trg_seq).
+            - src_seq: torch tensor of shape (?); variable length.
+            - trg_seq: torch tensor of shape (?); variable length.
+    Returns:
+        src_seqs: torch tensor of shape (batch_size, padded_length).
+        src_lengths: list of length (batch_size); valid length for each padded source sequence.
+        trg_seqs: torch tensor of shape (batch_size, padded_length).
+        trg_lengths: list of length (batch_size); valid length for each padded target sequence.
+    """
+    def merge(sequences):
+        lengths = [len(seq) for seq in sequences]
+        padded_seqs = torch.zeros(len(sequences), max(lengths)).long()
+        for i, seq in enumerate(sequences):
+            end = lengths[i]
+            padded_seqs[i, :end] = seq[:end]
+        return padded_seqs, lengths
+
+    # sort a list by sequence length (descending order) to use pack_padded_sequence
+    data.sort(key=lambda x: len(x[0]), reverse=True)
+
+    # seperate source and target sequences
+    src_seqs, trg_seqs, pos_seqs,lm_seqs,label = zip(*data)
+
+    # merge sequences (from tuple of 1D tensor to 2D tensor)
+    src_seqs, src_lengths = merge(src_seqs)
+    trg_seqs, trg_lengths = merge(trg_seqs)
+    pos_seqs, pos_lengths = merge(pos_seqs)
+    # lm_seqs, lm_lengths = merge(lm_seqs)
+    label = torch.tensor(label)
+    if USE_CUDA:
+        src_seqs = src_seqs.cuda()
+        trg_seqs = trg_seqs.cuda()
+        pos_seqs = pos_seqs.cuda()
+        # lm_seqs = lm_seqs.cuda()
+        label = label.cuda()
+    return Variable(LongTensor(src_seqs)), Variable(LongTensor(trg_seqs)), Variable(LongTensor(pos_seqs)),lm_seqs, label
+
+
+class GptDataset_nli(GptDataset):
+    def __init__(self, x_y_meta, tokenizer, filter_mode=None,num_turns=5):
+        super(GptDataset_nli, self).__init__(x_y_meta,tokenizer)
+        self.label = [1]*len(self.x_encoded) + [0]*len(self.x_encoded)
+        self.x_encoded = self.x_encoded + self.x_encoded
+        self.y_encoded = list(self.y_encoded) + random.sample(self.y_encoded,len(self.y_encoded))
+        self.x_encoded,self.y_encoded,self.label = zip(*random.sample(list(zip(self.x_encoded,self.y_encoded,self.label)),len(self.x_encoded)))
+
+    def __getitem__(self,index):
+        # former utterances - premise -speaker1 
+        # response - hypothesis - ref_start
+        x = []
+        type_x = []
+        lm_x = []
+        is_speaker1 = bool(len(self.x_encoded[index])%2) # which speaker start the conversation
+
+        for utt in self.x_encoded[index]:
+            if is_speaker1: # add the prefix special token for each utterance
+                x+=[self.speaker1]
+                type_x += [self.speaker1]*(len(utt)+1)
+            else:
+                x+=[self.speaker2]
+                type_x += [self.speaker2]*(len(utt)+1)
+            x += utt
+            is_speaker1 = not is_speaker1
+
+        total_input_length = len(x)
+
+        x += [self.ref_start] + self.y_encoded[index] + [self.eos]
+
+        type_x += [self.ref_start]*(len(self.y_encoded[index])+2)
+        position_x = list(range(len(x)))
+
+        x = torch.Tensor(x)
+        type_x = torch.Tensor(type_x)
+        position_x = torch.Tensor(position_x)
+        x_len = x.shape[0]
+        
+        return x,type_x,position_x,lm_x,self.label[index]
+
+class SnliDataset(Dataset):
+    """Take a list of samples with form [[x,...],y,meta]
+    """
+    # need 3 special tokens
+    # # as <ref start> 2
+    # $ as <speaker1> 3
+    # % as <speaker2> 4
+    # '<|endoftext|>' as <eos> 50256
+    def _split(self,data):
+        positive_label = set(['entailment'])
+        premise = []
+        hypothesis = []
+        label = []
+        for p,h,l in tqdm(data):
+            premise.append(self.tokenizer.encode(text_standardize(p)))
+            hypothesis.append(self.tokenizer.encode(text_standardize(h)))
+            if l in positive_label:
+                label.append(torch.tensor(1))
+            else:
+                label.append(torch.tensor(0))
+        return premise,hypothesis,label
+    
+    def _filter(self,premise,hypothesis,label,filter_mode=None):
+        data = zip(premise,hypothesis,label)
+        if filter_mode == None:
+            data_filt = data
+        else:
+            data_filt = [x for x in data if x[2]!='-']
+            
+        premise_filt,hypothesis_filt,label_filt = zip(*data_filt)
+        return premise_filt,hypothesis_filt,label_filt
+
+    def parse_snli(self,path=None):
+        with open(path) as f:
+            data = [json.loads(line) for line in f]
+        data_processed = [(line['sentence1'],line['sentence2'],line['gold_label']) for line in data]
+        return data_processed
+
+    def __init__(self,tokenizer,path='../data/snli_1.0/snli_1.0_test.jsonl',filter_mode=None,num_turns=5):
+        
+        self.data = self.parse_snli(path)
+        self.num_turns = num_turns
+        self.tokenizer = tokenizer
+        self.premise_encoded,self.hypothesis_encoded,self.label = self._split(self.data)
+        self.premise_encoded,self.hypothesis_encoded,self.label = self._filter(self.premise_encoded,self.hypothesis_encoded,self.label,filter_mode)
+        self.ref_start, self.speaker1,self.speaker2,self.eos = 2,3,4,50256
+
+    def __getitem__(self,index):
+        x = []
+        type_x = []
+        lm_x = []
+        
+        x += [self.speaker1]
+        x += self.premise_encoded[index]
+        type_x += [self.speaker1]*(len(self.premise_encoded[index])+1) # the premise part
+        
+        x += [self.ref_start] 
+        x += self.hypothesis_encoded[index]
+        x += [self.eos]
+        type_x += [self.ref_start]*(len(self.hypothesis_encoded[index])+2) # the hypothesis part
+        
+        label = self.label[index]
+        
+        position_x = list(range(len(x)))
+
+        x = torch.Tensor(x)
+        type_x = torch.Tensor(type_x)
+        position_x = torch.Tensor(position_x)
+        
+        return x,type_x,position_x,lm_x,label
+
+    def __len__(self):
+        return len(self.premise_encoded)

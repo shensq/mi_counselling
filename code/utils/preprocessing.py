@@ -134,6 +134,7 @@ def clean_text(text):
     text = re.sub("don't", "do not", text)
     text = re.sub("won't", "will not", text)
     text = re.sub("can't", "can not", text)
+    text = re.sub("[-()\"#/@;:<>{}+=~.…,|!?]", "", text)
     return text
 
 def main():

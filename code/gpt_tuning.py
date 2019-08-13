@@ -104,7 +104,7 @@ def main():
     counter=0
     for _ in trange(int(args.num_train_epochs), desc="Epoch"):
         # tqdm_bar = tqdm(data_loader, desc="Training")
-        for x,type_x,pos_x,lm_x,x_len in tqdm(data_loader):
+        for x,type_x,pos_x,lm_x,x_len,_ in tqdm(data_loader):
             if counter>0:
                 break
             # counter+=1

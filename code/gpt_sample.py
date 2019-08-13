@@ -14,7 +14,7 @@ from torch.autograd import Variable
 from tqdm import tqdm, trange
 from pytorch_transformers import GPT2LMHeadModel, GPT2Tokenizer
 from rouge import Rouge 
-from utils import clean_text,text_standardize
+from utils import clean_text,text_standardize,values_lexicon_encode
 from gpt_loader import GptDataset,collate_fn
 
 USE_CUDA = torch.cuda.is_available()
@@ -51,7 +51,7 @@ def get_topic_keywords(meta):
         keywords_down += [6551, 4483, 2057, 9799, 4425, 4461, 4255, 5517]
     return keywords_up, keywords_down
 
-def sample_sequence(model, length, start_token=None, batch_size=None, context=None, temperature=1, top_k=0, device='cuda', sample=True,meta=None):
+def sample_sequence(model, length, start_token=None, batch_size=None, context=None, temperature=1, top_k=0, modified_decoding=False,value_word_relation=None,device='cuda', sample=True,meta=None):
     if start_token is None:
         assert context is not None, 'Specify exactly one of start_token and context!'
         context = torch.tensor(context, device=device, dtype=torch.long).unsqueeze(0).repeat(batch_size, 1)
@@ -63,22 +63,57 @@ def sample_sequence(model, length, start_token=None, batch_size=None, context=No
     prev = context
     output = context
     past = None
+
+    # === get topic score ===
+    if value_word_relation != None:
+        value2word,word2value = value_word_relation
+        topic_scores = {}
+        topic_words = []
+        for t in context[0]:
+            token = t.tolist()
+            if token in word2value:
+                topic_words.append(token)
+                if word2value[token] not in topic_scores:
+                    topic_scores[word2value[token]]=1
+                else:
+                    topic_scores[word2value[token]]+=1
+    # ========
+
     with torch.no_grad():
         for i in trange(length):
             logits, past = model(prev, past=past)
             logits = logits[:, -1, :] / temperature # torch.Size([1, 50257])
-            #===
-            # logits[0][keywords_down]*=1.2 # multiply, lower logit, lower prob
-            logits[0][keywords_down]-= 100 # eliminate undesired word 
-            # logits[0][keywords_up]/=1.2
-            #===
             logits = top_k_logits(logits, k=top_k) 
-            log_probs = F.softmax(logits, dim=-1)
+            log_probs = F.softmax(logits, dim=-1) # torch.Size([1, 50257])
+            #=== modify probability after softmax ==========
+            if modified_decoding:
+                # logits[0][keywords_down]*=1.2 # multiply, lower logit, lower prob
+                # logits[0][keywords_down]-= 100 # eliminate undesired word 
+                # logits[0][keywords_up]/=1.2
+                # import pdb;pdb.set_trace()
+                
+                if value_word_relation!=None:
+                    for topic,score in topic_scores.items():
+                        log_probs[0][value2word[topic]]*=1+(0.1*score)
+                    log_probs[0][topic_words] *= 2
+                        
+            #===================
             if sample:
-                prev = torch.multinomial(log_probs, num_samples=1)
+                prev = torch.multinomial(log_probs, num_samples=1) # no need to normalize
+                # import pdb;pdb.set_trace()
+                prev_token = prev[0][0].tolist()
+                if prev_token in word2value:    
+                    print(prev_token)
+                    topic = word2value[prev_token]
+                    topic_words_i = [x for x in topic_words if x in value2word[topic]]
+                    log_probs[0][topic_words_i] *= 2
+                    prev = torch.multinomial(log_probs, num_samples=1) # no need to normalize
+
             else:
                 _, prev = torch.topk(log_probs, k=1, dim=-1)
             output = torch.cat((output, prev), dim=1)
+            if prev[0][0] in [50256]:
+                break
     return output
 
 def run_model():
@@ -92,6 +127,7 @@ def run_model():
     parser.add_argument("--top_k", type=int, default=0)
     parser.add_argument('--unconditional', action='store_true', help='If true, unconditional generation.')
     parser.add_argument('--output_dir',type=str,default='generate', help="The name of the output file.")
+    parser.add_argument('--modified_decoding', action='store_true')
     args = parser.parse_args()
     print(args)
 
@@ -112,7 +148,9 @@ def run_model():
     if USE_CUDA:
         model.cuda()
     tokenizer = GPT2Tokenizer.from_pretrained(model_dir)
-
+    
+    # ========== Prepare lexicon =============
+    value2word, word2value = values_lexicon_encode(path='../data_processed/values_lexicon/values_lexicon.txt',tokenizer=tokenizer)
     # =============== Load & process data ==============
     pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/x_y_meta','rb')
     x_y_meta = pickle.load(pickle_handler)
@@ -142,7 +180,7 @@ def run_model():
     counter=0
     for x,type_x,pos_x,lm_x,input_len,*meta in test_loader:
         input_len = input_len[0]
-        if counter>1000:
+        if counter>=1000:
             break
         counter+=1
         print(counter)
@@ -164,10 +202,11 @@ def run_model():
                 context=context_tokens,
                 start_token=None,
                 batch_size=args.batch_size,
-                temperature=args.temperature, top_k=args.top_k, device=device,meta=meta[0][0] # an extra index for *meta
+                temperature=args.temperature, top_k=args.top_k, modified_decoding=args.modified_decoding,
+                value_word_relation=(value2word,word2value),device=device,meta=meta[0][0] # an extra index for *meta
             )
             
-            out = out[:, len(context_tokens):].tolist() # the generated result
+            out = out[:, len(context_tokens):-1].tolist() # the generated result,get rid of eos
 
             ref.append(tokenizer.decode(x[0].tolist()[len(context_tokens):-1]))
             f_ref.write(tokenizer.decode(x[0].tolist()[len(context_tokens):-1]))
@@ -186,56 +225,30 @@ def run_model():
             #     text = tokenizer.decode(out[i])
             #     print("=" * 40 + " SAMPLE " + str(generated) + " " + "=" * 40)
             #     print(text)
+    
+    # ======= Recording the experiment results
     with open('../result/rouge.txt','a') as f_result:
         rouge = Rouge()
+        print(len(hyp))
+        print(len(ref))
         scores = rouge.get_scores(hyp, ref,avg=True)
         print("ROUGE",scores)
         f_result.write(args.model_dir+'\n')
         f_result.write(str(scores))
         f_result.write('\n')
-            
-    # while True:
-    #     context_tokens = []
-    #     if not args.unconditional:
-    #         raw_text = input("Model prompt >>> ")
-    #         while not raw_text:
-    #             print('Prompt should not be empty!')
-    #             raw_text = input("Model prompt >>> ")
-    #         context_tokens = tokenizer.encode(raw_text)
-    #         generated = 0
-    #         for _ in range(args.nsamples // args.batch_size):
-    #             out = sample_sequence(
-    #                 model=model, length=args.length,
-    #                 context=context_tokens,
-    #                 start_token=None,
-    #                 batch_size=args.batch_size,
-    #                 temperature=args.temperature, top_k=args.top_k, device=device
-    #             )
-    #             out = out[:, len(context_tokens):].tolist()
-    #             for i in range(args.batch_size):
-    #                 generated += 1
-    #                 text = tokenizer.decode(out[i])
-    #                 print("=" * 40 + " SAMPLE " + str(generated) + " " + "=" * 40)
-    #                 print(text)
-    #         print("=" * 80)
+    # ================
+    import sys
+    sys.path.append('/data/chuancen/pip_package')
+    import nltk
+    from nltk.translate.meteor_score import meteor_score
+    nltk.data.path.append('/data/chuancen/pip_package/nltk_data')
+    print("#ref{} #hyp{}".format(len(ref),len(hyp)))
+    meteor_sum = 0
+    for i in range(min(len(ref),len(hyp))):
+        meteor_sum += meteor_score([ref[i]],hyp[i])
 
-    #     else:
-    #         generated = 0
-    #         for _ in range(args.nsamples // args.batch_size):
-    #             out = sample_sequence(
-    #                 model=model, length=args.length,
-    #                 context=None,
-    #                 start_token=tokenizer.encoder['<|endoftext|>'],
-    #                 batch_size=args.batch_size,
-    #                 temperature=args.temperature, top_k=args.top_k, device=device
-    #             )
-    #             out = out[:,1:].tolist()
-    #             for i in range(args.batch_size):
-    #                 generated += 1
-    #                 text = tokenizer.decode(out[i])
-    #                 print("=" * 40 + " SAMPLE " + str(generated) + " " + "=" * 40)
-    #                 print(text)
-    #         print("=" * 80)
+    meteor_sum/=min(len(ref),len(hyp))
+    print(meteor_sum)   
 
 if __name__ == '__main__':
     run_model()
