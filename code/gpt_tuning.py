@@ -13,7 +13,7 @@ from torch.autograd import Variable
 from tqdm import tqdm, trange
 import random 
 from utils import clean_text,text_standardize
-from gpt_loader import GptDataset,collate_fn
+from gpt_loader import GptDataset,collate_fn,GptDataset_aug
 
 # OPTIONAL: if you want to have more information on what's happening, activate the logger as follows
 import logging
@@ -34,6 +34,8 @@ def main():
     parser.add_argument('--weight_decay', type=float, default=0.01)
     parser.add_argument('--lm_coef', type=float, default=0.9)
     parser.add_argument('--n_valid', type=int, default=374)
+    parser.add_argument('--augment', action='store_true')
+    parser.add_argument('--special_input',type=str,default='x_y_meta')
 
     parser.add_argument('--server_ip', type=str, default='', help="Can be used for distant debugging.")
     parser.add_argument('--server_port', type=str, default='', help="Can be used for distant debugging.")
@@ -63,10 +65,21 @@ def main():
     # folder = '../data_processed/'
     # x_flat = pickle.load(open(folder+'x_flat','rb'))
     # y_all_join = pickle.load(open(folder+'y_all_join','rb'))
-    pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/x_y_meta','rb')
-    x_y_meta = pickle.load(pickle_handler)
-    gpt_data = GptDataset(x_y_meta,tokenizer,args.output_dir) # use the output model name as pattern name
-    print("Dataset initialized.")
+
+    if args.augment:
+        print("Using augmented data")
+        pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/x_y_meta_aug','rb')
+        x_y_meta = pickle.load(pickle_handler)
+        gpt_data = GptDataset_aug(x_y_meta,tokenizer)
+    else:
+        if args.special_input != 'x_y_meta':
+            print("Using mutated data.")
+            pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/'+args.special_input,'rb')
+        else:
+            pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/x_y_meta','rb')
+        x_y_meta = pickle.load(pickle_handler)
+        gpt_data = GptDataset(x_y_meta,tokenizer,args.output_dir) # use the output model name as pattern name
+    print("Dataset initialized. There are {} samples.".format(len(gpt_data)))
 
     test_size  = int(len(gpt_data)*0.10)
     val_size = int(len(gpt_data)*0.05)

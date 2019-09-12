@@ -16,6 +16,7 @@ from gpt_loader import GptDataset,collate_fn,collate_fn_nli,GptDataset_nli,SnliD
 from torch.utils.data import Dataset,DataLoader
 from model import GPT2ClassHeadsModel
 import pickle
+import logging
 
 def get_doc_utterance(files):
     num_turns = 5
@@ -122,6 +123,7 @@ def get_sentence_tfidf(x,word2index,idf):
     return query_tfidf
 
 def main():
+    logging.basicConfig(level=logging.INFO)
     filepath = '/data/chuancen/LIT/mi_counselling/data/annotations/'
     files = glob.glob(filepath+'[1-9m]*.txt')
     model_dir = '/data/chuancen/LIT/models/mi_nli'
@@ -130,19 +132,22 @@ def main():
         model.cuda()
     tokenizer = GPT2Tokenizer.from_pretrained(model_dir)
     print('Model loaded.')
-    model_dir = '/data/chuancen/LIT/models/snli_tuning'
-    tokenizer = GPT2Tokenizer.from_pretrained(model_dir)
 
-    gpt_data = SnliDataset(tokenizer)
+    pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/x_y_meta','rb')
+    x_y_meta = pickle.load(pickle_handler)
+    gpt_data = GptDataset_nli(x_y_meta,tokenizer,augment=False)
+
+    # model_dir = '/data/chuancen/LIT/models/snli_tuning'
+    # tokenizer = GPT2Tokenizer.from_pretrained(model_dir)
+    # gpt_data = SnliDataset(tokenizer)
     
     doc_responses, doc_utterances = get_doc_utterance(files)
     tf_idf,tf,idf,word2index,index2word = get_tfidf(files,doc_utterances)
     
-    pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/x_y_meta','rb')
-    x_y_meta = pickle.load(pickle_handler)
+
 
     x_y_meta_aug = []
-
+    
     for x,y,meta in tqdm(x_y_meta):
         query_tfidf = get_sentence_tfidf(x,word2index,idf)
         doc_score = tf_idf.T.dot(query_tfidf).reshape(len(files))
@@ -150,11 +155,14 @@ def main():
         response_candidates = doc_responses[top_k_idx]
 
         candidate_score = []
-        candidates = list(zip(response_candidates, [y]*len(response_candidates),[None]*len(response_candidates)))
-        gpt_data.premise_encoded,gpt_data.hypothesis_encoded,gpt_data.label = gpt_data._split(candidates)
+        candidates = list(zip(response_candidates, [y]*len(response_candidates),[0]*len(response_candidates)))
+        # gpt_data.premise_encoded,gpt_data.hypothesis_encoded,gpt_data.label = gpt_data._split(candidates)
+        gpt_data.x_encoded,gpt_data.y_encoded,gpt_data.label = gpt_data._split(candidates)
         data_loader = DataLoader(dataset=gpt_data,batch_size=1,shuffle=False,drop_last=False,collate_fn=collate_fn_nli)
-        
         for token_x,type_x,pos_x,lm_x,label in data_loader:
+            if token_x.shape[1]>=512:
+                candidate_score.append(float('-inf'))
+                continue
             loss,logits = model(token_x, position_ids=pos_x, token_type_ids=type_x, labels=label) # [batch,class]
             candidate_score.append(logits[:,1].item()) # does not support batch
         if len(candidate_score)>0:

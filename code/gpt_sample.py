@@ -15,7 +15,7 @@ from tqdm import tqdm, trange
 from pytorch_transformers import GPT2LMHeadModel, GPT2Tokenizer
 from rouge import Rouge 
 from utils import clean_text,text_standardize,values_lexicon_encode
-from gpt_loader import GptDataset,collate_fn
+from gpt_loader import GptDataset,collate_fn,GptDataset_aug
 
 USE_CUDA = torch.cuda.is_available()
 FloatTensor = torch.cuda.FloatTensor if USE_CUDA else torch.FloatTensor
@@ -128,6 +128,8 @@ def run_model():
     parser.add_argument('--unconditional', action='store_true', help='If true, unconditional generation.')
     parser.add_argument('--output_dir',type=str,default='generate', help="The name of the output file.")
     parser.add_argument('--modified_decoding', action='store_true')
+    parser.add_argument('--augment', action='store_true')
+    parser.add_argument('--special_input',type=str,default='x_y_meta')
     args = parser.parse_args()
     print(args)
 
@@ -152,9 +154,16 @@ def run_model():
     # ========== Prepare lexicon =============
     value2word, word2value = values_lexicon_encode(path='../data_processed/values_lexicon/values_lexicon.txt',tokenizer=tokenizer)
     # =============== Load & process data ==============
-    pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/x_y_meta','rb')
-    x_y_meta = pickle.load(pickle_handler)
-    gpt_data = GptDataset(x_y_meta,tokenizer,args.output_dir) # use the name of output, it is depend on how is the trained model
+    if args.augment:
+        print("Using augmented data.")
+        pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/x_y_meta_aug','rb')
+        x_y_meta = pickle.load(pickle_handler)
+        gpt_data = GptDataset_aug(x_y_meta,tokenizer) # use the name of output, it is depend on how is the trained model
+    else:
+        pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/'+args.special_input,'rb')
+        x_y_meta = pickle.load(pickle_handler)
+        gpt_data = GptDataset(x_y_meta,tokenizer,args.output_dir) # use the output model name as pattern name
+
     print("Dataset initialized.")
     test_size  = int(len(gpt_data)*0.10)
     val_size = int(len(gpt_data)*0.05)
@@ -195,10 +204,12 @@ def run_model():
         context_tokens = x[0][:input_len+1] # at evaluation stage, the input is without the ground truth
         generated = 0
         for i in range(args.nsamples // args.batch_size):
-
+            decode_length = int(len(context_tokens))
+            # if args.augment:
+            #     decode_length = int(0.5 * (5/6) * len(context_tokens))
             out = sample_sequence(
                 # model=model, length=args.length,
-                model=model,length=int(0.5*len(context_tokens)),
+                model=model,length=decode_length,
                 context=context_tokens,
                 start_token=None,
                 batch_size=args.batch_size,
@@ -233,6 +244,8 @@ def run_model():
         print(len(ref))
         scores = rouge.get_scores(hyp, ref,avg=True)
         print("ROUGE",scores)
+        import time 
+        f_result.write(time.asctime()+'\n')
         f_result.write(args.model_dir+'\n')
         f_result.write(str(scores))
         f_result.write('\n')
