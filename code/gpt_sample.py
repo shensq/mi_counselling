@@ -205,7 +205,7 @@ def run_model():
             x, type_x, pos_x, lm_x, x_len, meta = sample
             keyword_x = x
 
-        input_len = input_len[0]
+        input_len = x_len[0]
         if counter>=1000:
             break
         counter+=1
