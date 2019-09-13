@@ -239,6 +239,92 @@ def collate_fn_nli(data):
         label = label.cuda()
     return Variable(LongTensor(src_seqs)), Variable(LongTensor(trg_seqs)), Variable(LongTensor(pos_seqs)),lm_seqs, label
 
+def collate_fn_keyword(data):
+    def merge(sequences):
+        lengths = [len(seq) for seq in sequences]
+        padded_seqs = torch.zeros(len(sequences), max(lengths)).long()
+        for i, seq in enumerate(sequences):
+            end = lengths[i]
+            padded_seqs[i, :end] = seq[:end]
+        return padded_seqs, lengths
+
+    # sort a list by sequence length (descending order) to use pack_padded_sequence
+    data.sort(key=lambda x: len(x[0]), reverse=True)
+
+    # seperate source and target sequences
+    src_seqs, trg_seqs, pos_seqs, lm_seqs, total_input_length, meta, keyword_x = zip(*data)
+
+    # merge sequences (from tuple of 1D tensor to 2D tensor)
+    src_seqs, src_lengths = merge(src_seqs)
+    trg_seqs, trg_lengths = merge(trg_seqs)
+    pos_seqs, pos_lengths = merge(pos_seqs)
+    lm_seqs, lm_lengths = merge(lm_seqs)
+    if USE_CUDA:
+        src_seqs = src_seqs.cuda()
+        trg_seqs = trg_seqs.cuda()
+        pos_seqs = pos_seqs.cuda()
+        lm_seqs = lm_seqs.cuda()
+        keyword_x = keyword_x.cuda()
+    return Variable(LongTensor(src_seqs)), Variable(LongTensor(trg_seqs)), Variable(LongTensor(pos_seqs)),Variable(LongTensor(lm_seqs)), total_input_length, meta,Variable(LongTensor(keyword_x))
+
+class GptDataset_keyword(Dataset):
+    def _split(self, x_y_meta):
+        x_all = []
+        y_all = []
+        meta_all = []
+        keyword_all = []
+        for x, y, meta, keyword in x_y_meta:
+            meta_all.append(meta)
+            x_all.append([self.tokenizer.encode(text_standardize(x_i)) for x_i in x])
+            y_all.append(self.tokenizer.encode(text_standardize(y)))
+            keyword_all.append(self.tokenizer.encode(text_standardize(keyword)))
+        return x_all, y_all, meta_all, keyword_all
+
+    def __init__(self, x_y_meta, tokenizer, num_turns=5):
+
+        self.x_y_meta = x_y_meta
+        self.num_turns = num_turns
+        self.tokenizer = tokenizer
+        self.x_encoded, self.y_encoded, self.meta, self.keyword = self._split(x_y_meta)
+        self.ref_start, self.speaker1, self.speaker2, self.eos = 2, 3, 4, 50256
+
+    def __getitem__(self, index):
+        x = []
+        type_x = []
+        lm_x = []
+        is_speaker1 = bool(len(self.x_encoded[index]) % 2)  # which speaker start the conversation
+
+        for utt in self.x_encoded[index]:
+            if is_speaker1:  # add the prefix special token for each utterance
+                x += [self.speaker1]
+                type_x += [self.speaker1] * (len(utt) + 1)
+            else:
+                x += [self.speaker2]
+                type_x += [self.speaker2] * (len(utt) + 1)
+            x += utt
+            is_speaker1 = not is_speaker1
+        lm_x += [-1] * len(x)  # all position for the input is masked for loss calculation
+
+        total_input_length = len(x)
+
+        x += [self.ref_start] + self.y_encoded[index] + [self.eos]
+
+        type_x += [self.ref_start] * (len(self.y_encoded[index]) + 2)
+        lm_x += [-1] + self.y_encoded[index] + [self.eos]
+        position_x = list(range(len(x)))
+
+        x = torch.Tensor(x)
+        type_x = torch.Tensor(type_x)
+        position_x = torch.Tensor(position_x)
+        lm_x = torch.Tensor(lm_x)
+        x_len = x.shape[0]
+
+        keyword_x = [] + self.keyword[index]
+        return x, type_x, position_x, lm_x, total_input_length, self.meta[index], keyword_x
+
+    def __len__(self):
+        return len(self.x_encoded)
+
 
 class GptDataset_nli(GptDataset):
     def __init__(self, x_y_meta, tokenizer, filter_mode=None,num_turns=5,augment=True):

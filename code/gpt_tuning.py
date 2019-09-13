@@ -15,7 +15,7 @@ from torch.autograd import Variable
 from tqdm import tqdm, trange
 import random 
 from utils import clean_text,text_standardize
-from gpt_loader import GptDataset,collate_fn,GptDataset_aug
+from gpt_loader import GptDataset,collate_fn,GptDataset_aug, GptDataset_keyword, collate_fn_keyword
 
 # OPTIONAL: if you want to have more information on what's happening, activate the logger as follows
 import logging
@@ -37,7 +37,8 @@ def main():
     parser.add_argument('--lm_coef', type=float, default=0.9)
     parser.add_argument('--n_valid', type=int, default=374)
     parser.add_argument('--augment', action='store_true')
-    parser.add_argument('--special_input',type=str,default='x_y_meta')
+    parser.add_argument('--keyword', action='store_true')
+    parser.add_argument('--special_input', type=str, default='x_y_meta')
 
     parser.add_argument('--server_ip', type=str, default='', help="Can be used for distant debugging.")
     parser.add_argument('--server_port', type=str, default='', help="Can be used for distant debugging.")
@@ -58,9 +59,11 @@ def main():
     # ====== Load GPT2 model ========
     model_dir = '/data/chuancen/LIT/models/'+args.model_dir
     model = GPT2LMHeadModel.from_pretrained(model_dir)
+    # model = GPT2LMHeadModel.from_pretrained('gpt2')
     if USE_CUDA:
         model.cuda()
     tokenizer = GPT2Tokenizer.from_pretrained(model_dir)
+    # tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     print('Model loaded.')
     # =============== Load & process data ==============
     # # folder = '/home/shensq/gpt_tuning/multiturns_data/'
@@ -73,12 +76,18 @@ def main():
         pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/x_y_meta_aug','rb')
         x_y_meta = pickle.load(pickle_handler)
         gpt_data = GptDataset_aug(x_y_meta,tokenizer)
+    elif args.keyword:
+        print("Using keyword cross attention")
+        pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/x_y_meta_keyword','rb')
+        # pickle_handler = open('/Users/shensq/Google Drive/Research/mi_counselling/data_processed/x_y_meta_keyword', 'rb')
+        x_y_meta = pickle.load(pickle_handler)
+        gpt_data = GptDataset_keyword(x_y_meta, tokenizer)
     else:
         if args.special_input != 'x_y_meta':
             print("Using mutated data.")
-            pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/'+args.special_input,'rb')
+            pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/'+args.special_input, 'rb')
         else:
-            pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/x_y_meta','rb')
+            pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/x_y_meta', 'rb')
         x_y_meta = pickle.load(pickle_handler)
         gpt_data = GptDataset(x_y_meta,tokenizer,args.output_dir) # use the output model name as pattern name
     print("Dataset initialized. There are {} samples.".format(len(gpt_data)))
@@ -87,8 +96,12 @@ def main():
     val_size = int(len(gpt_data)*0.05)
     gpt_train,gpt_test,gpt_val = torch.utils.data.random_split(gpt_data,[len(gpt_data)-test_size-val_size,test_size,val_size])
 
-    data_loader = DataLoader(dataset=gpt_train,batch_size=args.train_batch_size,shuffle=True,drop_last=True,collate_fn=collate_fn)
-    test_loader = DataLoader(dataset=gpt_test,batch_size=4,shuffle=True,drop_last=True,collate_fn=collate_fn)
+    if args.keyword:
+        data_loader = DataLoader(dataset=gpt_train, batch_size=args.train_batch_size, shuffle=True, drop_last=True,
+                                 collate_fn=collate_fn_keyword)
+    else:
+        data_loader = DataLoader(dataset=gpt_train,batch_size=args.train_batch_size,shuffle=True,drop_last=True,collate_fn=collate_fn)
+        test_loader = DataLoader(dataset=gpt_test,batch_size=4,shuffle=True,drop_last=True,collate_fn=collate_fn)
 
     # ========== Prepare optimizer =============
     param_optimizer = list(model.named_parameters())
@@ -115,16 +128,15 @@ def main():
     print("Start training.")
     model.train()
     exp_average_loss = None
-    
-    counter=0
+
     for _ in trange(int(args.num_train_epochs), desc="Epoch"):
-        # tqdm_bar = tqdm(data_loader, desc="Training")
-        for x,type_x,pos_x,lm_x,x_len,_ in tqdm(data_loader):
-            if counter>0:
-                break
-            # counter+=1
-            # print("Get data")
-            loss = model(x, position_ids=pos_x, token_type_ids=type_x, labels=lm_x)[0]
+        for sample in tqdm(data_loader):
+            if args.keyword:
+                x, type_x, pos_x, lm_x, x_len, _, keyword_x = sample
+            else:
+                x, type_x, pos_x, lm_x, x_len, _ = sample
+                keyword_x = x
+            loss = model(x, position_ids=pos_x, token_type_ids=type_x, labels=lm_x, key_word=keyword_x)[0]
             # print("Forward pass")
             # loss.backward(torch.ones(2).cuda())
             loss.backward()
