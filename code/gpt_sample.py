@@ -15,7 +15,7 @@ from tqdm import tqdm, trange
 from pytorch_transformers import GPT2LMHeadModel, GPT2Tokenizer
 from rouge import Rouge 
 from utils import clean_text,text_standardize,values_lexicon_encode
-from gpt_loader import GptDataset,collate_fn,GptDataset_aug
+from gpt_loader import GptDataset,collate_fn,GptDataset_aug, GptDataset_keyword, collate_fn_keyword
 
 USE_CUDA = torch.cuda.is_available()
 FloatTensor = torch.cuda.FloatTensor if USE_CUDA else torch.FloatTensor
@@ -51,7 +51,7 @@ def get_topic_keywords(meta):
         keywords_down += [6551, 4483, 2057, 9799, 4425, 4461, 4255, 5517]
     return keywords_up, keywords_down
 
-def sample_sequence(model, length, start_token=None, batch_size=None, context=None, temperature=1, top_k=0, modified_decoding=False,value_word_relation=None,device='cuda', sample=True,meta=None):
+def sample_sequence(model, length, start_token=None, batch_size=None, context=None, temperature=1, top_k=0, modified_decoding=False,value_word_relation=None,device='cuda', sample=True,meta=None, key_word=None):
     if start_token is None:
         assert context is not None, 'Specify exactly one of start_token and context!'
         context = torch.tensor(context, device=device, dtype=torch.long).unsqueeze(0).repeat(batch_size, 1)
@@ -81,7 +81,7 @@ def sample_sequence(model, length, start_token=None, batch_size=None, context=No
 
     with torch.no_grad():
         for i in trange(length):
-            logits, past = model(prev, past=past)
+            logits, past = model(prev, past=past, key_word=key_word)
             logits = logits[:, -1, :] / temperature # torch.Size([1, 50257])
             logits = top_k_logits(logits, k=top_k) 
             log_probs = F.softmax(logits, dim=-1) # torch.Size([1, 50257])
@@ -130,6 +130,7 @@ def run_model():
     parser.add_argument('--modified_decoding', action='store_true')
     parser.add_argument('--augment', action='store_true')
     parser.add_argument('--special_input',type=str,default='x_y_meta')
+    parser.add_argument('--keyword', action='store_true')
     args = parser.parse_args()
     print(args)
 
@@ -159,6 +160,12 @@ def run_model():
         pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/x_y_meta_aug','rb')
         x_y_meta = pickle.load(pickle_handler)
         gpt_data = GptDataset_aug(x_y_meta,tokenizer) # use the name of output, it is depend on how is the trained model
+    elif args.keyword:
+        print("Using keyword cross attention")
+        pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/x_y_meta_keyword', 'rb')
+        # pickle_handler = open('/Users/shensq/Google Drive/Research/mi_counselling/data_processed/x_y_meta_keyword', 'rb')
+        x_y_meta = pickle.load(pickle_handler)
+        gpt_data = GptDataset_keyword(x_y_meta, tokenizer)
     else:
         pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/'+args.special_input,'rb')
         x_y_meta = pickle.load(pickle_handler)
@@ -170,7 +177,11 @@ def run_model():
     gpt_train,gpt_test,gpt_val = torch.utils.data.random_split(gpt_data,[len(gpt_data)-test_size-val_size,test_size,val_size])
 
     # data_loader = DataLoader(dataset=gpt_train,batch_size=args.train_batch_size,shuffle=True,drop_last=True,collate_fn=collate_fn)
-    test_loader = DataLoader(dataset=gpt_test,batch_size=args.batch_size,shuffle=True,drop_last=True,collate_fn=collate_fn)
+    if args.keyword:
+        test_loader = DataLoader(dataset=gpt_test, batch_size=args.batch_size, shuffle=True, drop_last=True,
+                                 collate_fn=collate_fn_keyword)
+    else:
+        test_loader = DataLoader(dataset=gpt_test,batch_size=args.batch_size,shuffle=True,drop_last=True,collate_fn=collate_fn)
 # ====
 
     model.eval()
@@ -187,7 +198,13 @@ def run_model():
     f = open('../result/'+args.output_dir+'.txt','w')
     f_ref = open('../result/reference_'+args.output_dir+'.txt','w')
     counter=0
-    for x,type_x,pos_x,lm_x,input_len,*meta in test_loader:
+    for sample in test_loader:
+        if args.keyword:
+            x, type_x, pos_x, lm_x, x_len, meta, keyword_x = sample
+        else:
+            x, type_x, pos_x, lm_x, x_len, meta = sample
+            keyword_x = x
+
         input_len = input_len[0]
         if counter>=1000:
             break
@@ -214,7 +231,7 @@ def run_model():
                 start_token=None,
                 batch_size=args.batch_size,
                 temperature=args.temperature, top_k=args.top_k, modified_decoding=args.modified_decoding,
-                value_word_relation=(value2word,word2value),device=device,meta=meta[0][0] # an extra index for *meta
+                value_word_relation=(value2word,word2value),device=device,meta=meta[0][0], key_word=keyword_x # an extra index for *meta
             )
             
             out = out[:, len(context_tokens):-1].tolist() # the generated result,get rid of eos
