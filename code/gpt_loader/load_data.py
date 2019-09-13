@@ -259,6 +259,7 @@ def collate_fn_keyword(data):
     trg_seqs, trg_lengths = merge(trg_seqs)
     pos_seqs, pos_lengths = merge(pos_seqs)
     lm_seqs, lm_lengths = merge(lm_seqs)
+    keyword_x, _ = merge(keyword_x)
     if USE_CUDA:
         src_seqs = src_seqs.cuda()
         trg_seqs = trg_seqs.cuda()
@@ -320,6 +321,7 @@ class GptDataset_keyword(Dataset):
         x_len = x.shape[0]
 
         keyword_x = [] + self.keyword[index]
+        keyword_x = torch.Tensor(keyword_x)
         return x, type_x, position_x, lm_x, total_input_length, self.meta[index], keyword_x
 
     def __len__(self):
