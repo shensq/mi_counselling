@@ -96,6 +96,65 @@ class GptDataset(Dataset):
     def __len__(self):
         return len(self.x_encoded)
 
+class GptDataset_aug(Dataset):
+    def _split(self,x_y_meta):
+        x_all = []
+        y_all = []
+        meta_all = []
+        aug_all = []
+        for x,y,meta,aug in x_y_meta:
+            meta_all.append(meta)
+            x_all.append([self.tokenizer.encode(text_standardize(x_i)) for x_i in x])
+            y_all.append(self.tokenizer.encode(text_standardize(y)))
+            aug_all.append(self.tokenizer.encode(text_standardize(aug)))
+        return x_all,y_all,meta_all,aug_all
+
+    def __init__(self,x_y_meta,tokenizer,num_turns=5):
+        self.x_y_meta = x_y_meta
+        self.num_turns = num_turns
+        self.tokenizer = tokenizer
+        self.x_encoded,self.y_encoded,self.meta,self.aug_encoded = self._split(x_y_meta)
+        self.ref_start, self.speaker1,self.speaker2,self.eos = 2,3,4,50256
+        self.augment = 5
+
+    def __getitem__(self,index):
+        x = []
+        type_x = []
+        lm_x = []
+
+        x += [self.augment] + self.aug_encoded[index]
+        type_x += [self.augment] * len(x)
+
+        is_speaker1 = bool(len(self.x_encoded[index])%2) # which speaker start the conversation
+
+        for utt in self.x_encoded[index]:
+            if is_speaker1: # add the prefix special token for each utterance
+                x+=[self.speaker1]
+                type_x += [self.speaker1]*(len(utt)+1)
+            else:
+                x+=[self.speaker2]
+                type_x += [self.speaker2]*(len(utt)+1)
+            x += utt
+            is_speaker1 = not is_speaker1
+        lm_x += [-1]*len(x) # all position for the input is masked for loss calculation
+
+        total_input_length = len(x)
+
+        x += [self.ref_start] + self.y_encoded[index] + [self.eos]
+
+        type_x += [self.ref_start]*(len(self.y_encoded[index])+2)
+        lm_x += [-1] + self.y_encoded[index] + [self.eos]
+        position_x = list(range(len(x)))
+
+        x = torch.Tensor(x)
+        type_x = torch.Tensor(type_x)
+        position_x = torch.Tensor(position_x)
+        lm_x = torch.Tensor(lm_x)
+        x_len = x.shape[0]
+        
+        return x,type_x,position_x,lm_x,total_input_length,self.meta[index]
+    def __len__(self):
+        return len(self.x_encoded)
 def collate_fn(data):
     """Creates mini-batch tensors from the list of tuples (src_seq, trg_seq).
     We should build a custom collate_fn rather than using default collate_fn,
@@ -182,12 +241,15 @@ def collate_fn_nli(data):
 
 
 class GptDataset_nli(GptDataset):
-    def __init__(self, x_y_meta, tokenizer, filter_mode=None,num_turns=5):
+    def __init__(self, x_y_meta, tokenizer, filter_mode=None,num_turns=5,augment=True):
         super(GptDataset_nli, self).__init__(x_y_meta,tokenizer)
-        self.label = [1]*len(self.x_encoded) + [0]*len(self.x_encoded)
-        self.x_encoded = self.x_encoded + self.x_encoded
-        self.y_encoded = list(self.y_encoded) + random.sample(self.y_encoded,len(self.y_encoded))
-        self.x_encoded,self.y_encoded,self.label = zip(*random.sample(list(zip(self.x_encoded,self.y_encoded,self.label)),len(self.x_encoded)))
+        if not augment:
+            self.label = [1]*len(self.x_encoded)
+        else:
+            self.label = [1]*len(self.x_encoded) + [0]*len(self.x_encoded)
+            self.x_encoded = self.x_encoded + self.x_encoded
+            self.y_encoded = list(self.y_encoded) + random.sample(self.y_encoded,len(self.y_encoded))
+        # self.x_encoded,self.y_encoded,self.label = zip(*random.sample(list(zip(self.x_encoded,self.y_encoded,self.label)),len(self.x_encoded)))
 
     def __getitem__(self,index):
         # former utterances - premise -speaker1 

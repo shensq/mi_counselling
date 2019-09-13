@@ -20,7 +20,7 @@ import logging
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_dir",default='345M_Alex',type=str,required=False,
+    parser.add_argument("--model_dir",default='345M_origin',type=str,required=False,
                         help="The directory of the model to be tuned.")
     parser.add_argument("--output_dir", default='mi_tuned', type=str, required=False,
                         help="The output directory where the model predictions and checkpoints will be written.")
@@ -28,12 +28,11 @@ def main():
     parser.add_argument('--num_train_epochs', type=int, default=3)
     parser.add_argument('--train_batch_size', type=int, default=1)
     parser.add_argument('--max_grad_norm', type=int, default=1)
-    parser.add_argument('--learning_rate', type=float, default=6.25e-5)
+    # parser.add_argument('--learning_rate', type=float, default=6.25e-5)
+    parser.add_argument('--learning_rate', type=float, default=1e-4)
     parser.add_argument('--warmup_proportion', type=float, default=0.002)
     parser.add_argument('--lr_schedule', type=str, default='warmup_linear')
     parser.add_argument('--weight_decay', type=float, default=0.01)
-    parser.add_argument('--lm_coef', type=float, default=0.9)
-    parser.add_argument('--n_valid', type=int, default=374)
     parser.add_argument('--snli', action='store_true')
 
     parser.add_argument('--server_ip', type=str, default='', help="Can be used for distant debugging.")
@@ -66,7 +65,7 @@ def main():
     if args.snli:
         gpt_data = SnliDataset(tokenizer) # use the output model name as pattern name
     else:
-        gpt_data = GptDataset_nli(x_y_meta,tokenizer)
+        gpt_data = GptDataset_nli(x_y_meta,tokenizer,augment=True)
     
     print("Dataset initialized.")
     
@@ -77,21 +76,23 @@ def main():
     
     data_loader = DataLoader(dataset=gpt_train,batch_size=args.train_batch_size,shuffle=True,drop_last=True,collate_fn=collate_fn_nli)
     test_loader = DataLoader(dataset=gpt_test,batch_size=4,shuffle=True,drop_last=True,collate_fn=collate_fn_nli)
+
     # ========== Prepare optimizer =============
     param_optimizer = list(model.named_parameters())
+    # import pdb;pdb.set_trace()
     no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
     optimizer_grouped_parameters = [
-        {'params': [p for n, p in param_optimizer if n=='classifier.weight'], 'weight_decay': 0.01,'lr':1e-4},
-        {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay) and n!='classifier.weight'], 'weight_decay': 0.01},
-        {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay) and n=='classifier.weight'], 'weight_decay': 0.0}
+        {'params': [p for n, p in param_optimizer if n[:10]=='classifier'], 'weight_decay': 0.01},
+        {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay) and n[:10]!='classifier'], 'weight_decay': 0.01},
+        {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay) and n[:10]!='classifier'], 'weight_decay': 0.0}
         ]
     # optimizer_grouped_parameters = [{'params': [p for n, p in param_optimizer if n=='classifier.weight'], 'weight_decay': 0.01,'lr':1e-4}]
 
     num_train_optimization_steps = len(gpt_train) * args.num_train_epochs // args.train_batch_size
     num_warmup_steps = int(num_train_optimization_steps * 0.1)
-    warm_up_proportion = float(num_warmup_steps) / float(num_train_optimization_steps)
 
-    optimizer = AdamW(optimizer_grouped_parameters,lr=args.learning_rate,correct_bias=False)
+    optimizer = AdamW(optimizer_grouped_parameters,lr=args.learning_rate,correct_bias=True)
+    # scheduler = pytorch_transformers.optimization.WarmupCosineSchedule(optimizer, warmup_steps=num_warmup_steps, t_total=num_train_optimization_steps,cycles=1.5)
     scheduler = pytorch_transformers.optimization.WarmupLinearSchedule(optimizer, warmup_steps=num_warmup_steps, t_total=num_train_optimization_steps)
     # optimizer = OpenAIAdam(optimizer_grouped_parameters,
     #                     lr=args.learning_rate,
@@ -119,6 +120,7 @@ def main():
             # loss.backward(torch.ones(2).cuda())
             if torch.argmax(logits,dim=1).item()==label.item():
                 accuracy+=1
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1)
             loss.backward()
             scheduler.step()
             optimizer.step()
