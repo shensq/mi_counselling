@@ -148,12 +148,15 @@ def run_model():
     # TODO: use the new data, store to another file
     model_dir = '/data/chuancen/LIT/models/'+args.model_dir
     model = GPT2LMHeadModel.from_pretrained(model_dir)
+    # model = GPT2LMHeadModel.from_pretrained('gpt2')
     if USE_CUDA:
         model.cuda()
     tokenizer = GPT2Tokenizer.from_pretrained(model_dir)
+    # tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     
     # ========== Prepare lexicon =============
     value2word, word2value = values_lexicon_encode(path='../data_processed/values_lexicon/values_lexicon.txt',tokenizer=tokenizer)
+
     # =============== Load & process data ==============
     if args.augment:
         print("Using augmented data.")
