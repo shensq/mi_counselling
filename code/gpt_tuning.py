@@ -136,6 +136,8 @@ def main():
             else:
                 x, type_x, pos_x, lm_x, x_len, _ = sample
                 keyword_x = x
+            if x_len[0] > 1023:
+                continue
             loss = model(x, position_ids=pos_x, token_type_ids=type_x, labels=lm_x, key_word=keyword_x)[0]
             # print("Forward pass")
             # loss.backward(torch.ones(2).cuda())

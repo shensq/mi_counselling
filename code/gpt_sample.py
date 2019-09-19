@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import sys
+sys.path.insert(0,'/data/chuancen/pip_package')
 
 import argparse
 import logging
@@ -81,7 +83,7 @@ def sample_sequence(model, length, start_token=None, batch_size=None, context=No
 
     with torch.no_grad():
         for i in trange(length):
-            logits, past = model(prev, past=past, key_word=key_word)
+            logits, past = model(prev, past=past, key_word=key_word,use_keyword=False)
             logits = logits[:, -1, :] / temperature # torch.Size([1, 50257])
             logits = top_k_logits(logits, k=top_k) 
             log_probs = F.softmax(logits, dim=-1) # torch.Size([1, 50257])
@@ -101,14 +103,14 @@ def sample_sequence(model, length, start_token=None, batch_size=None, context=No
             if sample:
                 prev = torch.multinomial(log_probs, num_samples=1) # no need to normalize
                 # import pdb;pdb.set_trace()
-                prev_token = prev[0][0].tolist()
-                if prev_token in word2value:    
-                    print(prev_token)
-                    topic = word2value[prev_token]
-                    topic_words_i = [x for x in topic_words if x in value2word[topic]]
-                    log_probs[0][topic_words_i] *= 2
-                    prev = torch.multinomial(log_probs, num_samples=1) # no need to normalize
-
+                if modified_decoding:
+                    prev_token = prev[0][0].tolist()
+                    if prev_token in word2value:    
+                        print(prev_token)
+                        topic = word2value[prev_token]
+                        topic_words_i = [x for x in topic_words if x in value2word[topic]]
+                        log_probs[0][topic_words_i] *= 2
+                        prev = torch.multinomial(log_probs, num_samples=1) # no need to normalize
             else:
                 _, prev = torch.topk(log_probs, k=1, dim=-1)
             output = torch.cat((output, prev), dim=1)
@@ -200,6 +202,7 @@ def run_model():
 
     f = open('../result/'+args.output_dir+'.txt','w')
     f_ref = open('../result/reference_'+args.output_dir+'.txt','w')
+    f_input = open('../result/input.txt','w')
     counter=0
     for sample in test_loader:
         if args.keyword:
@@ -209,6 +212,8 @@ def run_model():
             keyword_x = x
 
         input_len = x_len[0]
+        if input_len > 1023:
+            continue
         if counter>=1000:
             break
         counter+=1
@@ -238,7 +243,8 @@ def run_model():
             )
             
             out = out[:, len(context_tokens):-1].tolist() # the generated result,get rid of eos
-
+            
+            f_input.write(tokenizer.decode(x[0].tolist()))
             ref.append(tokenizer.decode(x[0].tolist()[len(context_tokens):-1]))
             f_ref.write(tokenizer.decode(x[0].tolist()[len(context_tokens):-1]))
             f_ref.write('\n')
