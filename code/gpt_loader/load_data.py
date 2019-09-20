@@ -5,6 +5,7 @@ import json
 import random
 import sys
 from tqdm import tqdm
+import copy
 sys.path.append("..")
 from utils import text_standardize
 
@@ -335,8 +336,8 @@ class GptDataset_nli(GptDataset):
             self.label = [1]*len(self.x_encoded)
         else:
             self.label = [1]*len(self.x_encoded) + [0]*len(self.x_encoded)
-            self.x_encoded = self.x_encoded + self.x_encoded
-            self.y_encoded = list(self.y_encoded) + random.sample(self.y_encoded,len(self.y_encoded))
+            self.x_encoded = self.x_encoded + copy.deepcopy(self.x_encoded)
+            self.y_encoded = list(self.y_encoded) + random.sample(copy.deepcopy(self.y_encoded), len(self.y_encoded))
         # self.x_encoded,self.y_encoded,self.label = zip(*random.sample(list(zip(self.x_encoded,self.y_encoded,self.label)),len(self.x_encoded)))
 
     def __getitem__(self,index):
