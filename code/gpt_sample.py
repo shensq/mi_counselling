@@ -222,12 +222,12 @@ def run_model():
     # ====== Load GPT2 model ========
     # TODO: use the new data, store to another file
     model_dir = '/data/chuancen/LIT/models/'+args.model_dir
-    model = GPT2LMHeadModel.from_pretrained(model_dir)
-    # model = GPT2LMHeadModel.from_pretrained('gpt2')
+    # model = GPT2LMHeadModel.from_pretrained(model_dir)
+    model = GPT2LMHeadModel.from_pretrained('gpt2')
     if USE_CUDA:
         model.cuda()
-    tokenizer = GPT2Tokenizer.from_pretrained(model_dir)
-    # tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+    # tokenizer = GPT2Tokenizer.from_pretrained(model_dir)
+    tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     
     # ========== Prepare lexicon =============
     value2word, word2value = values_lexicon_encode(path='../data_processed/values_lexicon/values_lexicon.txt',tokenizer=tokenizer)
@@ -240,8 +240,8 @@ def run_model():
         gpt_data = GptDataset_aug(x_y_meta,tokenizer) # use the name of output, it is depend on how is the trained model
     elif args.keyword:
         print("Using keyword cross attention")
-        pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/x_y_meta_keyword', 'rb')
-        # pickle_handler = open('/Users/shensq/Google Drive/Research/mi_counselling/data_processed/x_y_meta_keyword', 'rb')
+        # pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/x_y_meta_keyword', 'rb')
+        pickle_handler = open('/Users/shensq/Google Drive/Research/mi_counselling/data_processed/x_y_meta_keyword', 'rb')
         x_y_meta = pickle.load(pickle_handler)
         gpt_data = GptDataset_keyword(x_y_meta, tokenizer)
     else:
