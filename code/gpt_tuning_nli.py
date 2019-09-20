@@ -18,9 +18,30 @@ from model import GPT2ClassHeadsModel
 # OPTIONAL: if you want to have more information on what's happening, activate the logger as follows
 import logging
 
+def eval(data_loader, model):
+    tqdm_bar = tqdm(data_loader, desc="Evaluating")
+    accuracy = 0
+    total = 0
+    model.eval()
+
+    with torch.no_grad():
+        for x, type_x, pos_x, lm_x, label in data_loader:
+            loss, logits = model(x, position_ids=pos_x, token_type_ids=type_x, labels=label)
+
+            total += 1
+            if torch.argmax(logits, dim=1).item() == label.item():
+                accuracy += 1
+
+            exp_average_loss = loss.item() if exp_average_loss is None else 0.7 * exp_average_loss + 0.3 * loss.item()
+            tqdm_bar.update(1)
+            tqdm_bar.set_postfix(loss=exp_average_loss, correct=accuracy)
+
+    accuracy /= total
+    print("Accuracy is {}".format(accuracy))
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_dir",default='345M_origin',type=str,required=False,
+    parser.add_argument("--model_dir",default='345M_origin', type=str,required=False,
                         help="The directory of the model to be tuned.")
     parser.add_argument("--output_dir", default='mi_tuned', type=str, required=False,
                         help="The output directory where the model predictions and checkpoints will be written.")
@@ -55,27 +76,33 @@ def main():
     # ====== Load GPT2 model ========
     model_dir = '/data/chuancen/LIT/models/'+args.model_dir
     model = GPT2ClassHeadsModel.from_pretrained(model_dir)
+    # model = GPT2ClassHeadsModel.from_pretrained('gpt2')
     if USE_CUDA:
         model.cuda()
     tokenizer = GPT2Tokenizer.from_pretrained(model_dir)
+    # tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     print('Model loaded.')
     # =============== Load & process data ==============
-    pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/x_y_meta','rb')
+    # pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/x_y_meta','rb')
+    pickle_handler = open('../data_precessed/x_y_meta', 'rb')
     x_y_meta = pickle.load(pickle_handler)
     if args.snli:
-        gpt_data = SnliDataset(tokenizer) # use the output model name as pattern name
+        gpt_data = SnliDataset(tokenizer)  # use the output model name as pattern name
     else:
-        gpt_data = GptDataset_nli(x_y_meta,tokenizer,augment=True)
+        gpt_data = GptDataset_nli(x_y_meta, tokenizer, augment=True)
     
     print("Dataset initialized.")
-    
 
     test_size  = int(len(gpt_data)*0.10)
     val_size = int(len(gpt_data)*0.05)
     gpt_train,gpt_test,gpt_val = torch.utils.data.random_split(gpt_data,[len(gpt_data)-test_size-val_size,test_size,val_size])
     
     data_loader = DataLoader(dataset=gpt_train,batch_size=args.train_batch_size,shuffle=True,drop_last=True,collate_fn=collate_fn_nli)
-    test_loader = DataLoader(dataset=gpt_test,batch_size=4,shuffle=True,drop_last=True,collate_fn=collate_fn_nli)
+    test_loader = DataLoader(dataset=gpt_test, batch_size=1, shuffle=True, drop_last=True, collate_fn=collate_fn_nli)
+
+    if True:
+        eval(data_loader, model)
+        return
 
     # ========== Prepare optimizer =============
     param_optimizer = list(model.named_parameters())
