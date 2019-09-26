@@ -222,12 +222,12 @@ def run_model():
     # ====== Load GPT2 model ========
     # TODO: use the new data, store to another file
     model_dir = '/data/chuancen/LIT/models/'+args.model_dir
-    # model = GPT2LMHeadModel.from_pretrained(model_dir)
-    model = GPT2LMHeadModel.from_pretrained('gpt2')
+    model = GPT2LMHeadModel.from_pretrained(model_dir)
+    # model = GPT2LMHeadModel.from_pretrained('gpt2')
     if USE_CUDA:
         model.cuda()
-    # tokenizer = GPT2Tokenizer.from_pretrained(model_dir)
-    tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+    tokenizer = GPT2Tokenizer.from_pretrained(model_dir)
+    # tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     
     # ========== Prepare lexicon =============
     value2word, word2value = values_lexicon_encode(path='../data_processed/values_lexicon/values_lexicon.txt',tokenizer=tokenizer)
@@ -240,8 +240,8 @@ def run_model():
         gpt_data = GptDataset_aug(x_y_meta,tokenizer) # use the name of output, it is depend on how is the trained model
     elif args.keyword:
         print("Using keyword cross attention")
-        # pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/x_y_meta_keyword', 'rb')
-        pickle_handler = open('/Users/shensq/Google Drive/Research/mi_counselling/data_processed/x_y_meta_keyword', 'rb')
+        pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/x_y_meta_keyword', 'rb')
+        # pickle_handler = open('/Users/shensq/Google Drive/Research/mi_counselling/data_processed/x_y_meta_keyword', 'rb')
         x_y_meta = pickle.load(pickle_handler)
         gpt_data = GptDataset_keyword(x_y_meta, tokenizer)
     else:
@@ -310,8 +310,7 @@ def run_model():
                 batch_size=args.batch_size,
                 temperature=args.temperature, top_k=args.top_k, modified_decoding=args.modified_decoding,
                 value_word_relation=(value2word,word2value),device=device,meta=meta[0][0], key_word=keyword_x # an extra index for *meta
-            )
-            
+            )           
             out = out[:, len(context_tokens):-1].tolist() # the generated result,get rid of eos
 
             ref.append(tokenizer.decode(x[0].tolist()[len(context_tokens):-1]))
@@ -337,6 +336,8 @@ def run_model():
         rouge = Rouge()
         print(len(hyp))
         print(len(ref))
+        hyp, ref = zip(*[(x,y) for x,y in zip(hyp, ref) if len(x)!=0 and len(y)!=0])
+        print(len(hyp))
         scores = rouge.get_scores(hyp, ref,avg=True)
         print("ROUGE",scores)
         import time 

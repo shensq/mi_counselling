@@ -9,9 +9,9 @@ class GPT2ClassHeadsModel(GPT2Model):
         super(GPT2ClassHeadsModel, self).__init__(config)
         self.transformer = GPT2Model(config)
         
-        # self.classifier = nn.Linear(config.n_embd, 2)
-        self.classifier = nn.Sequential(nn.Linear(config.n_embd, 768), nn.Tanh(), nn.Dropout(p=0.1),
-                                        nn.Linear(768, 2))
+        self.classifier = nn.Linear(config.n_embd, 2)
+        # self.classifier = nn.Sequential(nn.Linear(config.n_embd, 768), nn.Tanh(), nn.Dropout(p=0.1),
+        #                                 nn.Linear(768, 2))
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
         self.apply(self.init_weights)

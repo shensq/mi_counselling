@@ -22,6 +22,7 @@ def eval(data_loader, model):
     tqdm_bar = tqdm(data_loader, desc="Evaluating")
     accuracy = 0
     total = 0
+    exp_average_loss = None
     model.eval()
 
     with torch.no_grad():
@@ -50,14 +51,12 @@ def main():
     parser.add_argument('--train_batch_size', type=int, default=1)
     parser.add_argument('--max_grad_norm', type=int, default=1)
     # parser.add_argument('--learning_rate', type=float, default=6.25e-5)
-    parser.add_argument('--learning_rate', type=float, default=1e-4)
-    parser.add_argument('--warmup_proportion', type=float, default=0.002)
+    parser.add_argument('--learning_rate', type=float, default=6.25e-5)
+    parser.add_argument('--warmup_proportion', type=float, default=0.1)
     parser.add_argument('--lr_schedule', type=str, default='warmup_linear')
     parser.add_argument('--weight_decay', type=float, default=0.01)
     parser.add_argument('--snli', action='store_true')
-
-    parser.add_argument('--server_ip', type=str, default='', help="Can be used for distant debugging.")
-    parser.add_argument('--server_port', type=str, default='', help="Can be used for distant debugging.")
+    parser.add_argument('--eval', action='store_true')
     args = parser.parse_args()
     print(args)
 
@@ -84,7 +83,7 @@ def main():
     print('Model loaded.')
     # =============== Load & process data ==============
     # pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/x_y_meta','rb')
-    pickle_handler = open('../data_precessed/x_y_meta', 'rb')
+    pickle_handler = open('../data_processed/x_y_meta', 'rb')
     x_y_meta = pickle.load(pickle_handler)
     if args.snli:
         gpt_data = SnliDataset(tokenizer)  # use the output model name as pattern name
@@ -100,8 +99,8 @@ def main():
     data_loader = DataLoader(dataset=gpt_train,batch_size=args.train_batch_size,shuffle=True,drop_last=True,collate_fn=collate_fn_nli)
     test_loader = DataLoader(dataset=gpt_test, batch_size=1, shuffle=True, drop_last=True, collate_fn=collate_fn_nli)
 
-    if True:
-        eval(data_loader, model)
+    if args.eval:
+        eval(test_loader, model)
         return
 
     # ========== Prepare optimizer =============
