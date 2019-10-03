@@ -209,7 +209,7 @@ def load_model_data(args):
     else:
         pickle_handler = open('../data_processed/'+args.special_input, 'rb')
         x_y_meta = pickle.load(pickle_handler)
-        gpt_data = GptDataset(x_y_meta,tokenizer,args.output_dir, num_turn=args.num_turn) # use the output model name as pattern name
+        gpt_data = GptDataset(x_y_meta,tokenizer,args.output_dir, num_turns=args.num_turns) # use the output model name as pattern name
 
     print("Dataset initialized.")
     test_size  = int(len(gpt_data)*0.10)
@@ -306,7 +306,7 @@ def calculate_metric(hyp, ref, context, effective_length=1024):
 
 def rouge_rank(hyp, ref, context):
     rouge = Rouge()
-    import pdb;pdb.set_trace()
+    # import pdb;pdb.set_trace()
     hyp, ref = zip(*[(x,y) for x,y in zip(hyp, ref) if len(x)>3 and len(y)>3])
     scores = rouge.get_scores(hyp, ref,avg=False) # type: list
     scores_content = zip(scores, hyp, ref, context, range(len(hyp)))
@@ -334,7 +334,7 @@ if __name__ == '__main__':
     parser.add_argument('--augment', action='store_true')
     parser.add_argument('--special_input',type=str,default='x_y_meta_10turn')
     parser.add_argument('--keyword', action='store_true')
-    parser.add_argument('--num_turn', type=int, default=5)
+    parser.add_argument('--num_turns', type=int, default=5)
     args = parser.parse_args()
     if args.batch_size == -1:
         args.batch_size = 1
