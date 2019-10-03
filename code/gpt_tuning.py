@@ -40,6 +40,7 @@ def main():
     parser.add_argument('--keyword', action='store_true')
     parser.add_argument('--special_input', type=str, default='x_y_meta')
     parser.add_argument('--first_K_tokens', type=int, default=1024)
+    parser.add_argument('--num_turns', type=int, default=5)
     parser.add_argument('--server_ip', type=str, default='', help="Can be used for distant debugging.")
     parser.add_argument('--server_port', type=str, default='', help="Can be used for distant debugging.")
     args = parser.parse_args()
@@ -87,21 +88,22 @@ def main():
             print("Using mutated data.")
             pickle_handler = open('../data_processed/'+args.special_input, 'rb')
         else:
-            pickle_handler = open('../data_processed/x_y_meta', 'rb')
+            pickle_handler = open('../data_processed/x_y_meta_10turn', 'rb')
         x_y_meta = pickle.load(pickle_handler)
-        gpt_data = GptDataset(x_y_meta,tokenizer,args.output_dir) # use the output model name as pattern name
+        gpt_data = GptDataset(x_y_meta,tokenizer, args.output_dir, num_turns=args.num_turns) # use the output model name as pattern name
     print("Dataset initialized. There are {} samples.".format(len(gpt_data)))
 
     test_size  = int(len(gpt_data)*0.10)
     val_size = int(len(gpt_data)*0.05)
-    gpt_train,gpt_test,gpt_val = torch.utils.data.random_split(gpt_data,[len(gpt_data)-test_size-val_size,test_size,val_size])
+    gpt_train, gpt_test, gpt_val = torch.utils.data.random_split(gpt_data, [len(gpt_data)-test_size-val_size, test_size, val_size])
 
     if args.keyword:
         data_loader = DataLoader(dataset=gpt_train, batch_size=args.train_batch_size, shuffle=True, drop_last=True,
                                  collate_fn=collate_fn_keyword)
     else:
-        data_loader = DataLoader(dataset=gpt_train,batch_size=args.train_batch_size,shuffle=True,drop_last=True,collate_fn=collate_fn)
-        test_loader = DataLoader(dataset=gpt_test,batch_size=4,shuffle=True,drop_last=True,collate_fn=collate_fn)
+        data_loader = DataLoader(dataset=gpt_train, batch_size=args.train_batch_size, shuffle=True, drop_last=True,
+                                 collate_fn=collate_fn)
+        test_loader = DataLoader(dataset=gpt_test, batch_size=4, shuffle=True, drop_last=True, collate_fn=collate_fn)
 
     # ========== Prepare optimizer =============
     param_optimizer = list(model.named_parameters())
