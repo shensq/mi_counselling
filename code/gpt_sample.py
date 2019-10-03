@@ -207,9 +207,9 @@ def load_model_data(args):
         x_y_meta = pickle.load(pickle_handler)
         gpt_data = GptDataset_keyword(x_y_meta, tokenizer)
     else:
-        pickle_handler = open('../data_processed/'+args.special_input,'rb')
+        pickle_handler = open('../data_processed/'+args.special_input, 'rb')
         x_y_meta = pickle.load(pickle_handler)
-        gpt_data = GptDataset(x_y_meta,tokenizer,args.output_dir) # use the output model name as pattern name
+        gpt_data = GptDataset(x_y_meta,tokenizer,args.output_dir, num_turn=args.num_turn) # use the output model name as pattern name
 
     print("Dataset initialized.")
     test_size  = int(len(gpt_data)*0.10)
@@ -332,8 +332,9 @@ if __name__ == '__main__':
     parser.add_argument('--output_dir',type=str,default='generate', help="The name of the output file.")
     parser.add_argument('--modified_decoding', action='store_true')
     parser.add_argument('--augment', action='store_true')
-    parser.add_argument('--special_input',type=str,default='x_y_meta')
+    parser.add_argument('--special_input',type=str,default='x_y_meta_10turn')
     parser.add_argument('--keyword', action='store_true')
+    parser.add_argument('--num_turn', type=int, default=5)
     args = parser.parse_args()
     if args.batch_size == -1:
         args.batch_size = 1
@@ -348,7 +349,6 @@ if __name__ == '__main__':
     model, toknenizer, test_loader = load_model_data(args)
 
     hyp, ref, context = run_model(args, model, toknenizer, test_loader)
-    import pdb;pdb.set_trace()
     sample_ranked = rouge_rank(hyp, ref, context)
     with open("../data_processed/rouge_rank_" + args.model_dir,'wb') as f:
         pickle.dump(sample_ranked, f)
