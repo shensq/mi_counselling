@@ -306,7 +306,7 @@ def calculate_metric(hyp, ref, context, effective_length=1024):
 
 def rouge_rank(hyp, ref, context):
     rouge = Rouge()
-    import pdb;pdb.set_trace()
+    # import pdb;pdb.set_trace()
     hyp, ref = zip(*[(x,y) for x,y in zip(hyp, ref) if len(x)>3 and len(y)>3])
     scores = rouge.get_scores(hyp, ref,avg=False) # type: list
     scores_content = zip(scores, hyp, ref, context, range(len(hyp)))
