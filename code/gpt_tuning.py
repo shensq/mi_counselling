@@ -1,7 +1,7 @@
 # Path to the pytorch checkpoint
 # /Users/shensq/Documents/LIT_ai_counseling/gpt2/models/pytorch_345M'
 import sys
-sys.path.insert(0,'/data/chuancen/pip_package')
+sys.path.insert(0,'/home/shensq/LIT/pip_package')
 
 import re
 import argparse
@@ -39,7 +39,7 @@ def main():
     parser.add_argument('--augment', action='store_true')
     parser.add_argument('--keyword', action='store_true')
     parser.add_argument('--special_input', type=str, default='x_y_meta')
-
+    parser.add_argument('--first_K_tokens', type=int, default=1024)
     parser.add_argument('--server_ip', type=str, default='', help="Can be used for distant debugging.")
     parser.add_argument('--server_port', type=str, default='', help="Can be used for distant debugging.")
     args = parser.parse_args()
@@ -57,7 +57,7 @@ def main():
     ByteTensor = torch.cuda.ByteTensor if USE_CUDA else torch.ByteTensor
 
     # ====== Load GPT2 model ========
-    model_dir = '/data/chuancen/LIT/models/'+args.model_dir
+    model_dir = '../models/'+args.model_dir
     model = GPT2LMHeadModel.from_pretrained(model_dir)
     # model = GPT2LMHeadModel.from_pretrained('gpt2')
     if USE_CUDA:
@@ -73,21 +73,21 @@ def main():
 
     if args.augment:
         print("Using augmented data")
-        pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/x_y_meta_aug','rb')
+        pickle_handler = open('../data_processed/x_y_meta_aug','rb')
         x_y_meta = pickle.load(pickle_handler)
         gpt_data = GptDataset_aug(x_y_meta,tokenizer)
     elif args.keyword:
         print("Using keyword cross attention")
-        pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/x_y_meta_keyword','rb')
+        pickle_handler = open('../data_processed/x_y_meta_keyword','rb')
         # pickle_handler = open('/Users/shensq/Google Drive/Research/mi_counselling/data_processed/x_y_meta_keyword', 'rb')
         x_y_meta = pickle.load(pickle_handler)
         gpt_data = GptDataset_keyword(x_y_meta, tokenizer)
     else:
         if args.special_input != 'x_y_meta':
             print("Using mutated data.")
-            pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/'+args.special_input, 'rb')
+            pickle_handler = open('../data_processed/'+args.special_input, 'rb')
         else:
-            pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/x_y_meta', 'rb')
+            pickle_handler = open('../data_processed/x_y_meta', 'rb')
         x_y_meta = pickle.load(pickle_handler)
         gpt_data = GptDataset(x_y_meta,tokenizer,args.output_dir) # use the output model name as pattern name
     print("Dataset initialized. There are {} samples.".format(len(gpt_data)))
@@ -136,14 +136,17 @@ def main():
             else:
                 x, type_x, pos_x, lm_x, x_len, _ = sample
                 keyword_x = x
+            input_len = x_len[0]
             if x_len[0] > 1023:
                 continue
+            
+            lm_x[:, x_len[0]+1+args.first_K_tokens:-1] = -1
             loss = model(x, position_ids=pos_x, token_type_ids=type_x, labels=lm_x, key_word=keyword_x)[0]
             # print("Forward pass")
             # loss.backward(torch.ones(2).cuda())
             loss.backward()
-            scheduler.step()
             optimizer.step()
+            scheduler.step()
             # print("loss BP")
             optimizer.zero_grad()
             exp_average_loss = loss.item() if exp_average_loss is None else 0.7*exp_average_loss+0.3*loss.item()
@@ -156,7 +159,7 @@ def main():
         model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
 
         # If we save using the predefined names, we can load using `from_pretrained`
-        output_dir = '/data/chuancen/LIT/models/'
+        output_dir = '../models/'
         output_model_file = os.path.join(output_dir+args.output_dir, WEIGHTS_NAME)
         output_config_file = os.path.join(output_dir+args.output_dir, CONFIG_NAME)
 

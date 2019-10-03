@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 import sys
-sys.path.insert(0,'/data/chuancen/pip_package')
+sys.path.insert(0,'/home/shensq/LIT/pip_package') # make sure the modified version of pytorch_transformer
+import pytorch_transformers
+# assert pytorch_transformers.__file__[-36:]=='pip_package/transformers/__init__.py'
+from pytorch_transformers import GPT2LMHeadModel, GPT2Tokenizer
 import argparse
 import logging
 import pickle
@@ -13,19 +16,11 @@ import numpy as np
 from torch.utils.data import Dataset,DataLoader
 from torch.autograd import Variable
 from tqdm import tqdm, trange
-from pytorch_transformers import GPT2LMHeadModel, GPT2Tokenizer
 from rouge import Rouge 
 from utils import clean_text,text_standardize,values_lexicon_encode
 from gpt_loader import GptDataset,collate_fn,GptDataset_aug, GptDataset_keyword, collate_fn_keyword
-
-USE_CUDA = torch.cuda.is_available()
-FloatTensor = torch.cuda.FloatTensor if USE_CUDA else torch.FloatTensor
-LongTensor = torch.cuda.LongTensor if USE_CUDA else torch.LongTensor
-ByteTensor = torch.cuda.ByteTensor if USE_CUDA else torch.ByteTensor
-logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
-                    datefmt = '%m/%d/%Y %H:%M:%S',
-                    level = logging.INFO)
-logger = logging.getLogger(__name__)
+import nltk
+from nltk.translate.meteor_score import meteor_score
 
 def top_k_logits(logits, k):
     """
@@ -51,7 +46,6 @@ def get_topic_keywords(meta):
         keywords_up += [46040, 21856, 2526, 13230, 7523, 15220]
         keywords_down += [6551, 4483, 2057, 9799, 4425, 4461, 4255, 5517]
     return keywords_up, keywords_down
-
 
 def top_k_top_p_filtering(logits, top_k=0, top_p=0.0, filter_value=-float('Inf')):
     """ Filter a distribution of logits using top-k and/or nucleus (top-p) filtering
@@ -83,7 +77,7 @@ def top_k_top_p_filtering(logits, top_k=0, top_p=0.0, filter_value=-float('Inf')
         logits[indices_to_remove] = filter_value
     return logits
 
-def sample_sequence_new(model, length, context, start_token=None, batch_size=1, modified_decoding=False,
+def sample_sequence(model, length, context, start_token=None, batch_size=1, modified_decoding=False,
                         value_word_relation=None, meta=None, key_word=None, num_samples=1, temperature=1,
                         top_k=0, top_p=0.0, device='cuda'):
     context = torch.tensor(context, dtype=torch.long, device=device)
@@ -105,8 +99,7 @@ def sample_sequence_new(model, length, context, start_token=None, batch_size=1, 
                 break
     return generated
 
-
-def sample_sequence(model, length, start_token=None, batch_size=None, context=None, temperature=1, top_k=0, modified_decoding=False,value_word_relation=None,device='cuda', sample=True,meta=None, key_word=None):
+def sample_sequence_old(model, length, start_token=None, batch_size=None, context=None, temperature=1, top_k=0, modified_decoding=False,value_word_relation=None,device='cuda', sample=True,meta=None, key_word=None):
     """ Generating a sequence until reaching the maximum length or getting an <eos> token.
 
     The generation is in an auto-regressive way. The initial input is the former utterances, w/o retrieved sentences or
@@ -191,61 +184,30 @@ def sample_sequence(model, length, start_token=None, batch_size=None, context=No
                 break
     return output
 
-def run_model():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--model_dir', type=str, default='345M_Alex', help='pretrained model name or path to local checkpoint')
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--nsamples", type=int, default=1)
-    parser.add_argument("--batch_size", type=int, default=-1)
-    parser.add_argument("--length", type=int, default=64)
-    parser.add_argument("--temperature", type=float, default=1.0)
-    parser.add_argument("--top_k", type=int, default=0)
-    parser.add_argument('--unconditional', action='store_true', help='If true, unconditional generation.')
-    parser.add_argument('--output_dir',type=str,default='generate', help="The name of the output file.")
-    parser.add_argument('--modified_decoding', action='store_true')
-    parser.add_argument('--augment', action='store_true')
-    parser.add_argument('--special_input',type=str,default='x_y_meta')
-    parser.add_argument('--keyword', action='store_true',default=True)
-    args = parser.parse_args()
-    print(args)
-
-    if args.batch_size == -1:
-        args.batch_size = 1
-    assert args.nsamples % args.batch_size == 0
-
-    np.random.seed(args.seed)
-    torch.random.manual_seed(args.seed)
-    torch.cuda.manual_seed(args.seed)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-#  === prepare data and model
+def load_model_data(args):
+    #  === prepare data and model
     # ====== Load GPT2 model ========
-    # TODO: use the new data, store to another file
-    model_dir = '/data/chuancen/LIT/models/'+args.model_dir
+    model_dir = '../models/'+args.model_dir
     model = GPT2LMHeadModel.from_pretrained(model_dir)
-    # model = GPT2LMHeadModel.from_pretrained('gpt2')
     if USE_CUDA:
         model.cuda()
     tokenizer = GPT2Tokenizer.from_pretrained(model_dir)
-    # tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
-    
     # ========== Prepare lexicon =============
     value2word, word2value = values_lexicon_encode(path='../data_processed/values_lexicon/values_lexicon.txt',tokenizer=tokenizer)
-
     # =============== Load & process data ==============
     if args.augment:
         print("Using augmented data.")
-        pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/x_y_meta_aug','rb')
+        pickle_handler = open('../data_processed/x_y_meta_aug','rb')
         x_y_meta = pickle.load(pickle_handler)
         gpt_data = GptDataset_aug(x_y_meta,tokenizer) # use the name of output, it is depend on how is the trained model
     elif args.keyword:
         print("Using keyword cross attention")
-        pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/x_y_meta_keyword', 'rb')
+        pickle_handler = open('../data_processed/x_y_meta_keyword', 'rb')
         # pickle_handler = open('/Users/shensq/Google Drive/Research/mi_counselling/data_processed/x_y_meta_keyword', 'rb')
         x_y_meta = pickle.load(pickle_handler)
         gpt_data = GptDataset_keyword(x_y_meta, tokenizer)
     else:
-        pickle_handler = open('/data/chuancen/LIT/mi_counselling/data_processed/'+args.special_input,'rb')
+        pickle_handler = open('../data_processed/'+args.special_input,'rb')
         x_y_meta = pickle.load(pickle_handler)
         gpt_data = GptDataset(x_y_meta,tokenizer,args.output_dir) # use the output model name as pattern name
 
@@ -253,15 +215,16 @@ def run_model():
     test_size  = int(len(gpt_data)*0.10)
     val_size = int(len(gpt_data)*0.05)
     gpt_train,gpt_test,gpt_val = torch.utils.data.random_split(gpt_data,[len(gpt_data)-test_size-val_size,test_size,val_size])
-
-    # data_loader = DataLoader(dataset=gpt_train,batch_size=args.train_batch_size,shuffle=True,drop_last=True,collate_fn=collate_fn)
     if args.keyword:
-        test_loader = DataLoader(dataset=gpt_test, batch_size=args.batch_size, shuffle=True, drop_last=True,
+        test_loader = DataLoader(dataset=gpt_test, batch_size=args.batch_size, shuffle=False, drop_last=True,
                                  collate_fn=collate_fn_keyword)
     else:
-        test_loader = DataLoader(dataset=gpt_test,batch_size=args.batch_size,shuffle=True,drop_last=True,collate_fn=collate_fn)
-# ====
+        test_loader = DataLoader(dataset=gpt_test,batch_size=args.batch_size,shuffle=False,drop_last=True,collate_fn=collate_fn)
 
+    return model, tokenizer, test_loader
+
+def run_model(args, model, tokenizer, test_loader):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.eval()
 
     if args.length == -1:
@@ -269,47 +232,36 @@ def run_model():
     elif args.length > model.config.n_ctx:
         raise ValueError("Can't get samples longer than window size: %s" % model.config.n_ctx)
 
-    # f = open('../result/generated_sample5.txt','w')
     hyp = []
     ref = []
-
+    context = []
     f = open('../result/'+args.output_dir+'.txt','w')
     f_ref = open('../result/reference_'+args.output_dir+'.txt','w')
-    counter=0
-    for sample in test_loader:
+    
+    for i,sample in enumerate(test_loader):
         if args.keyword:
             x, type_x, pos_x, lm_x, x_len, meta, keyword_x = sample
         else:
             x, type_x, pos_x, lm_x, x_len, meta = sample
             keyword_x = x
-
-        input_len = x_len[0]
-        if counter>=1000:
+        input_len = x_len[0] # The number of tokens of the context utterances
+        if i>=1e4:
             break
-        counter+=1
-        print(counter)
-        # f.write('='*5+'INPUT'+str(counter)+'='*5+'\n')
-        # f.write(tokenizer.decode(x[0].tolist()[:input_len]))
-        # f.write('\n')
+        print(i)
 
-        # print('='*5+'INPUT'+str(counter)+'='*5+'\n')
-        # print(tokenizer.decode(x[0].tolist()[:input_len]))
-        # print('='*5+'GROUND'+str(counter)+'='*5+'\n')
-        # print(tokenizer.decode(x[0].tolist()[input_len:]))
         context_tokens = x[0][:input_len+1] # at evaluation stage, the input is without the ground truth
         generated = 0
         for i in range(args.nsamples // args.batch_size):
             decode_length = int(len(context_tokens))
             # if args.augment:
             #     decode_length = int(0.5 * (5/6) * len(context_tokens))
-            out = sample_sequence_new(
-                # model=model, length=args.length,
+            out = sample_sequence(
                 model=model,length=decode_length,
                 context=context_tokens,
                 start_token=None,
                 batch_size=args.batch_size,
                 temperature=args.temperature, top_k=args.top_k, modified_decoding=args.modified_decoding,
-                value_word_relation=(value2word,word2value),device=device,meta=meta[0][0], key_word=keyword_x # an extra index for *meta
+                value_word_relation=None,device=device,meta=meta[0][0], key_word=keyword_x # an extra index for *meta
             )           
             out = out[:, len(context_tokens):-1].tolist() # the generated result,get rid of eos
 
@@ -317,40 +269,33 @@ def run_model():
             f_ref.write(tokenizer.decode(x[0].tolist()[len(context_tokens):-1]))
             f_ref.write('\n')
 
-            # f.write('='*5+'OUTPUT'+str(counter)+'='*5+'\n')
             hyp.append(tokenizer.decode(out[0]))
             f.write(tokenizer.decode(out[0]))
             f.write('\n')
-            # print('='*5+'OUTPUT'+str(counter)+'='*5+'\n')
-            # print(tokenizer.decode(out[0]))
+
+            context.append(tokenizer.decode(x[0].tolist()[:len(context_tokens)]))
     f.close()
     f_ref.close()
-            # for i in range(args.batch_size):
-            #     generated += 1
-            #     text = tokenizer.decode(out[i])
-            #     print("=" * 40 + " SAMPLE " + str(generated) + " " + "=" * 40)
-            #     print(text)
-    
-    # ======= Recording the experiment results
+    return hyp, ref, context
+
+def calculate_metric(hyp, ref, context, effective_length=1024):
+    # ===== Calculate rouge ========
     with open('../result/rouge.txt','a') as f_result:
         rouge = Rouge()
         print(len(hyp))
         print(len(ref))
-        hyp, ref = zip(*[(x,y) for x,y in zip(hyp, ref) if len(x)!=0 and len(y)!=0])
+        hyp, ref = zip(*[(x,y) for x,y in zip(hyp, ref) if len(x)>3 and len(y)>3])
         print(len(hyp))
+        hyp = [x[:effective_length] for x in hyp]
+        ref = [x[:effective_length] for x in ref]
         scores = rouge.get_scores(hyp, ref,avg=True)
         print("ROUGE",scores)
         import time 
         f_result.write(time.asctime()+'\n')
-        f_result.write(args.model_dir+'\n')
+        f_result.write(args.model_dir+ '\t' + str(effective_length) +'\n')
         f_result.write(str(scores))
         f_result.write('\n')
-    # ================
-    import sys
-    sys.path.append('/data/chuancen/pip_package')
-    import nltk
-    from nltk.translate.meteor_score import meteor_score
-    nltk.data.path.append('/data/chuancen/pip_package/nltk_data')
+    # ====== Calculate Meteor =========
     print("#ref{} #hyp{}".format(len(ref),len(hyp)))
     meteor_sum = 0
     for i in range(min(len(ref),len(hyp))):
@@ -359,7 +304,56 @@ def run_model():
     meteor_sum/=min(len(ref),len(hyp))
     print(meteor_sum)   
 
+def rouge_rank(hyp, ref, context):
+    rouge = Rouge()
+    import pdb;pdb.set_trace()
+    hyp, ref = zip(*[(x,y) for x,y in zip(hyp, ref) if len(x)>3 and len(y)>3])
+    scores = rouge.get_scores(hyp, ref,avg=False) # type: list
+    scores_content = zip(scores, hyp, ref, context, range(len(hyp)))
+    scores_content = sorted(scores_content, key=lambda x:x[0]['rouge-1']['f'], reverse=True)
+    return scores_content
+
 if __name__ == '__main__':
-    run_model()
+    USE_CUDA = torch.cuda.is_available()
+    logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
+                        datefmt = '%m/%d/%Y %H:%M:%S',
+                        level = logging.INFO)
+    logger = logging.getLogger(__name__)
+
+    # Parse command line arguments
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--model_dir', type=str, default='345M_Alex', help='pretrained model name or path to local checkpoint')
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--nsamples", type=int, default=1)
+    parser.add_argument("--batch_size", type=int, default=-1)
+    parser.add_argument("--length", type=int, default=64)
+    parser.add_argument("--temperature", type=float, default=1.0)
+    parser.add_argument("--top_k", type=int, default=0)
+    parser.add_argument('--output_dir',type=str,default='generate', help="The name of the output file.")
+    parser.add_argument('--modified_decoding', action='store_true')
+    parser.add_argument('--augment', action='store_true')
+    parser.add_argument('--special_input',type=str,default='x_y_meta')
+    parser.add_argument('--keyword', action='store_true')
+    args = parser.parse_args()
+    if args.batch_size == -1:
+        args.batch_size = 1
+    assert args.nsamples % args.batch_size == 0
+    print(args)
+
+    # Setup the random seeds.
+    np.random.seed(args.seed)
+    torch.random.manual_seed(args.seed)
+    torch.cuda.manual_seed(args.seed)
+
+    model, toknenizer, test_loader = load_model_data(args)
+
+    hyp, ref, context = run_model(args, model, toknenizer, test_loader)
+    import pdb;pdb.set_trace()
+    sample_ranked = rouge_rank(hyp, ref, context)
+    with open("../data_processed/rouge_rank_" + args.model_dir,'wb') as f:
+        pickle.dump(sample_ranked, f)
+    calculate_metric(hyp, ref, context)
+    calculate_metric(hyp, ref, context, 5)
+
 
 
