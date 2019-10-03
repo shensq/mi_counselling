@@ -14,7 +14,7 @@ from torch.utils.data import Dataset,DataLoader
 from torch.autograd import Variable
 from tqdm import tqdm, trange
 import random 
-from utils import clean_text,text_standardize
+from utils import clean_text, text_standardize, construct_grouped_parameters
 from gpt_loader import GptDataset,collate_fn,GptDataset_aug, GptDataset_keyword, collate_fn_keyword
 
 # OPTIONAL: if you want to have more information on what's happening, activate the logger as follows
@@ -106,25 +106,15 @@ def main():
         test_loader = DataLoader(dataset=gpt_test, batch_size=4, shuffle=True, drop_last=True, collate_fn=collate_fn)
 
     # ========== Prepare optimizer =============
-    param_optimizer = list(model.named_parameters())
-    no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
-    optimizer_grouped_parameters = [
-        {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
-        {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
-        ]
+
+    param_optimizer = list(model.named_parameters()) + list(model.lm_head.named_parameters()) # the gpt2 model from library has unnamed LM head.
+    optimizer_grouped_parameters = construct_grouped_parameters(param_optimizer, args.learning_rate)
 
     num_train_optimization_steps = len(gpt_train) * args.num_train_epochs // args.train_batch_size
     num_warmup_steps = int(num_train_optimization_steps * 0.1)
-    warm_up_proportion = float(num_warmup_steps) / float(num_train_optimization_steps)
 
     optimizer = AdamW(optimizer_grouped_parameters,lr=args.learning_rate,correct_bias=False)
     scheduler = pytorch_transformers.optimization.WarmupLinearSchedule(optimizer, warmup_steps=num_warmup_steps, t_total=num_train_optimization_steps)
-    # optimizer = OpenAIAdam(optimizer_grouped_parameters,
-    #                     lr=args.learning_rate,
-    #                     warmup=args.warmup_proportion,
-    #                     max_grad_norm=args.max_grad_norm,
-    #                     weight_decay=args.weight_decay,
-    #                     t_total=num_train_optimization_steps)
 
     # Training
     print("Start training.")
