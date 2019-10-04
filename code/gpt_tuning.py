@@ -125,7 +125,8 @@ def main():
     print("Start training.")
     model.train()
     exp_average_loss = None
-    for _ in trange(int(args.num_train_epochs), desc="Epoch"):
+    progress_bar = trange(int(args.num_train_epochs), desc="Epoch", leave=True)
+    for _ in progress_bar:
         for sample in tqdm(data_loader):
             if args.keyword:
                 x, type_x, pos_x, lm_x, x_len, _, keyword_x = sample
@@ -144,7 +145,7 @@ def main():
             # print("loss BP")
             optimizer.zero_grad()
             exp_average_loss = loss.item() if exp_average_loss is None else 0.7*exp_average_loss+0.3*loss.item()
-
+            progress_bar.set_description("Training loss: {}".format(exp_average_loss))
             # exp_average_loss = loss.mean().item() if exp_average_loss is None else 0.7*exp_average_loss+0.3*loss.mean().item()
             # tqdm_bar.desc = "Training loss: {:.2e} lr: {:.2e}".format(exp_average_loss, optimizer.get_lr()[0])
             # print(exp_average_loss)
