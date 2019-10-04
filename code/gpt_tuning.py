@@ -14,7 +14,7 @@ from torch.utils.data import Dataset,DataLoader
 from torch.autograd import Variable
 from tqdm import tqdm, trange
 import random 
-from utils import clean_text, text_standardize, construct_grouped_parameters
+from utils import clean_text, text_standardize, construct_grouped_parameters, get_unfeezing_funcs
 from gpt_loader import GptDataset,collate_fn,GptDataset_aug, GptDataset_keyword, collate_fn_keyword
 
 # OPTIONAL: if you want to have more information on what's happening, activate the logger as follows
@@ -31,7 +31,7 @@ def main():
     parser.add_argument('--train_batch_size', type=int, default=1)
     parser.add_argument('--max_grad_norm', type=int, default=1)
     parser.add_argument('--learning_rate', type=float, default=6.25e-5)
-    parser.add_argument('--warmup_proportion', type=float, default=0.002)
+    parser.add_argument('--warmup_proportion', type=float, default=0.1)
     parser.add_argument('--lr_schedule', type=str, default='warmup_linear')
     parser.add_argument('--weight_decay', type=float, default=0.01)
     parser.add_argument('--lm_coef', type=float, default=0.9)
@@ -60,11 +60,11 @@ def main():
     # ====== Load GPT2 model ========
     model_dir = '../models/'+args.model_dir
     model = GPT2LMHeadModel.from_pretrained(model_dir)
-    # model = GPT2LMHeadModel.from_pretrained('gpt2')
+    # model = GPT2LMHeadModel.from_pretrained('gpt2-medium')
     if USE_CUDA:
         model.cuda()
     tokenizer = GPT2Tokenizer.from_pretrained(model_dir)
-    # tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+    # tokenizer = GPT2Tokenizer.from_pretrained('gpt2-medium')
     print('Model loaded.')
     # =============== Load & process data ==============
     # # folder = '/home/shensq/gpt_tuning/multiturns_data/'
@@ -80,7 +80,6 @@ def main():
     elif args.keyword:
         print("Using keyword cross attention")
         pickle_handler = open('../data_processed/x_y_meta_keyword','rb')
-        # pickle_handler = open('/Users/shensq/Google Drive/Research/mi_counselling/data_processed/x_y_meta_keyword', 'rb')
         x_y_meta = pickle.load(pickle_handler)
         gpt_data = GptDataset_keyword(x_y_meta, tokenizer)
     else:
@@ -93,7 +92,7 @@ def main():
         gpt_data = GptDataset(x_y_meta,tokenizer, args.output_dir, num_turns=args.num_turns) # use the output model name as pattern name
     print("Dataset initialized. There are {} samples.".format(len(gpt_data)))
 
-    test_size  = int(len(gpt_data)*0.10)
+    test_size = int(len(gpt_data)*0.10)
     val_size = int(len(gpt_data)*0.05)
     gpt_train, gpt_test, gpt_val = torch.utils.data.random_split(gpt_data, [len(gpt_data)-test_size-val_size, test_size, val_size])
 
@@ -111,16 +110,21 @@ def main():
     optimizer_grouped_parameters = construct_grouped_parameters(param_optimizer, args.learning_rate)
 
     num_train_optimization_steps = len(gpt_train) * args.num_train_epochs // args.train_batch_size
-    num_warmup_steps = int(num_train_optimization_steps * 0.1)
 
-    optimizer = AdamW(optimizer_grouped_parameters,lr=args.learning_rate,correct_bias=False)
-    scheduler = pytorch_transformers.optimization.WarmupLinearSchedule(optimizer, warmup_steps=num_warmup_steps, t_total=num_train_optimization_steps)
+
+
+    lm_funcs = get_unfeezing_funcs(optimizer_grouped_parameters, warmup_portion=args.warmup_proportion, total_steps = num_train_optimization_steps)
+
+    optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate, correct_bias=False)
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lm_funcs)
+    # num_warmup_steps = int(num_train_optimization_steps * 0.1)
+    # scheduler = pytorch_transformers.optimization.WarmupLinearSchedule(optimizer, warmup_steps=num_warmup_steps, t_total=num_train_optimization_steps)
+
 
     # Training
     print("Start training.")
     model.train()
     exp_average_loss = None
-
     for _ in trange(int(args.num_train_epochs), desc="Epoch"):
         for sample in tqdm(data_loader):
             if args.keyword:
@@ -134,14 +138,13 @@ def main():
             
             lm_x[:, x_len[0]+1+args.first_K_tokens:-1] = -1
             loss = model(x, position_ids=pos_x, token_type_ids=type_x, labels=lm_x, key_word=keyword_x)[0]
-            # print("Forward pass")
-            # loss.backward(torch.ones(2).cuda())
             loss.backward()
             optimizer.step()
             scheduler.step()
             # print("loss BP")
             optimizer.zero_grad()
             exp_average_loss = loss.item() if exp_average_loss is None else 0.7*exp_average_loss+0.3*loss.item()
+
             # exp_average_loss = loss.mean().item() if exp_average_loss is None else 0.7*exp_average_loss+0.3*loss.mean().item()
             # tqdm_bar.desc = "Training loss: {:.2e} lr: {:.2e}".format(exp_average_loss, optimizer.get_lr()[0])
             # print(exp_average_loss)
