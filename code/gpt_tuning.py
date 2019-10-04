@@ -40,6 +40,7 @@ def main():
     parser.add_argument('--keyword', action='store_true')
     parser.add_argument('--special_input', type=str, default='x_y_meta')
     parser.add_argument('--first_K_tokens', type=int, default=1024)
+    parser.add_argument('--use_disc_lr', action='store_true')
     parser.add_argument('--num_turns', type=int, default=5)
     parser.add_argument('--server_ip', type=str, default='', help="Can be used for distant debugging.")
     parser.add_argument('--server_port', type=str, default='', help="Can be used for distant debugging.")
@@ -107,7 +108,7 @@ def main():
     # ========== Prepare optimizer =============
 
     param_optimizer = list(model.named_parameters()) + list(model.lm_head.named_parameters()) # the gpt2 model from library has unnamed LM head.
-    optimizer_grouped_parameters = construct_grouped_parameters(param_optimizer, args.learning_rate)
+    optimizer_grouped_parameters = construct_grouped_parameters(param_optimizer, args.learning_rate, use_discr=args.use_disc_lr)
 
     num_train_optimization_steps = len(gpt_train) * args.num_train_epochs // args.train_batch_size
 
