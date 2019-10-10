@@ -1,4 +1,4 @@
-def get_unfeezing_funcs(optimizer_grouped_parameters, warmup_portion, total_steps, use_unfreezing=True):
+def get_unfreezing_funcs(optimizer_grouped_parameters, warmup_portion, total_steps, use_unfreezing=True):
     def get_lr_lambda(block, use_unfreezing):
         if use_unfreezing:
             NUM_STAGES = 50

@@ -14,7 +14,7 @@ from torch.utils.data import Dataset,DataLoader
 from torch.autograd import Variable
 from tqdm import tqdm, trange
 import random 
-from utils import clean_text, text_standardize, construct_grouped_parameters, get_unfeezing_funcs
+from utils import clean_text, text_standardize, construct_grouped_parameters, get_unfreezing_funcs
 from gpt_loader import GptDataset,collate_fn,GptDataset_aug, GptDataset_keyword, collate_fn_keyword
 
 # OPTIONAL: if you want to have more information on what's happening, activate the logger as follows
@@ -113,7 +113,7 @@ def main():
 
     num_train_optimization_steps = len(gpt_train) * args.num_train_epochs // args.train_batch_size
 
-    lm_funcs = get_unfeezing_funcs(optimizer_grouped_parameters, warmup_portion=args.warmup_proportion, total_steps = num_train_optimization_steps, use_unfreezing=args.use_unfreezing)
+    lm_funcs = get_unfreezing_funcs(optimizer_grouped_parameters, warmup_portion=args.warmup_proportion, total_steps = num_train_optimization_steps, use_unfreezing=args.use_unfreezing)
 
     optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate, correct_bias=False)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lm_funcs)
