@@ -75,8 +75,8 @@ def main():
     
     # ====== Load GPT2 model ========
     model_dir = "../models/" + args.model_dir
-    model = GPT2ClassHeadsModel.from_pretrained(model_dir)
-    # model = GPT2ClassHeadsModel.from_pretrained('gpt2')
+    # model = GPT2ClassHeadsModel.from_pretrained(model_dir)
+    model = GPT2ClassHeadsModel.from_pretrained('gpt2')
     if USE_CUDA:
         model.cuda()
     # tokenizer = GPT2Tokenizer.from_pretrained(model_dir)
@@ -105,51 +105,31 @@ def main():
 
     # ========== Prepare optimizer =============
     param_optimizer = list(model.named_parameters())
-    # import pdb;pdb.set_trace()
     no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
     optimizer_grouped_parameters = [
-        {'params': [p for n, p in param_optimizer if 'classifier' in n and 'bias' not in n], 'weight_decay': 0.01, 'lr':1e-3},
-        {'params': [p for n, p in param_optimizer if 'classifier' in n and 'bias' in n], 'weight_decay': 0.00,'lr': 1e-3},
+        {'params': [p for n, p in param_optimizer if 'classifier' in n and 'bias' not in n], 'weight_decay': 0.01, 'lr':5 * args.learning_rate},
+        {'params': [p for n, p in param_optimizer if 'classifier' in n and 'bias' in n], 'weight_decay': 0.00,'lr': 5 * args.learning_rate},
         {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay) and 'classifier' not in n], 'weight_decay': 0.01},
         {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay) and 'classifier' not in n], 'weight_decay': 0.0}
         ]
-    # optimizer_grouped_parameters = [{'params': [p for n, p in param_optimizer if n=='classifier.weight'], 'weight_decay': 0.01,'lr':1e-4}]
 
     num_train_optimization_steps = len(gpt_train) * args.num_train_epochs // args.train_batch_size
-    num_warmup_steps = 400
+    num_warmup_steps = int(num_train_optimization_steps) * 0.1
 
     optimizer = AdamW(optimizer_grouped_parameters,lr=args.learning_rate,correct_bias=True)
     # scheduler = pytorch_transformers.optimization.WarmupCosineSchedule(optimizer, warmup_steps=num_warmup_steps, t_total=num_train_optimization_steps,cycles=1.5)
     scheduler = pytorch_transformers.optimization.WarmupLinearSchedule(optimizer, warmup_steps=num_warmup_steps, t_total=num_train_optimization_steps)
-    # optimizer = OpenAIAdam(optimizer_grouped_parameters,
-    #                     lr=args.learning_rate,
-    #                     warmup=args.warmup_proportion,
-    #                     max_grad_norm=args.max_grad_norm,
-    #                     weight_decay=args.weight_decay,
-    #                     t_total=num_train_optimization_steps)
 
     # Training
     print("Start training.")
     model.train()
     exp_average_loss = None
-    counter=0
 
     for epo in trange(int(args.num_train_epochs), desc="Epoch"):
         tqdm_bar = tqdm(data_loader, desc="Training")
         accuracy = 0 
         for x,type_x,pos_x,lm_x,label in data_loader:
-            if counter>0:
-                break
-            # for i in range(x.shape[0]):
-            #     if label[i].item()==0:
-            #         x[i,:].fill_(0)
-            #     else:
-            #         x[i,:].fill_(1)
-            # counter+=1
-            # print("Get data")
             loss,logits = model(x, position_ids=pos_x, token_type_ids=type_x, labels=label)
-            # print("Forward pass")
-            # loss.backward(torch.ones(2).cuda())
             pred = torch.argmax(logits, dim=1)
             for i in range(x.shape[0]):
                 if pred[i].item() == label[i].item():
@@ -157,26 +137,23 @@ def main():
             loss.backward()
             optimizer.step()
             scheduler.step()
-            # print("loss BP")
             optimizer.zero_grad()
             exp_average_loss = loss.item() if exp_average_loss is None else 0.7*exp_average_loss+0.3*loss.item()
             tqdm_bar.update(1)
             tqdm_bar.set_postfix(loss=exp_average_loss,correct=accuracy)
-            # exp_average_loss = loss.mean().item() if exp_average_loss is None else 0.7*exp_average_loss+0.3*loss.mean().item()
-            # tqdm_bar.desc = "Training loss: {:.2e}".format(exp_average_loss)
-            # print(exp_average_loss)
+
         accuracy/=len(gpt_train)
         print("Accuracy for epoch {} is {}".format(epo,accuracy))
         
         # ==== Save the model ====
         # Save a trained model, configuration and tokenizer
         model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
-        
+
         # If we save using the predefined names, we can load using `from_pretrained`
         output_dir = '../models/'
         output_model_file = os.path.join(output_dir+args.output_dir, WEIGHTS_NAME)
         output_config_file = os.path.join(output_dir+args.output_dir, CONFIG_NAME)
-        
+
         torch.save(model_to_save.state_dict(), output_model_file)
         model_to_save.config.to_json_file(output_config_file)
         tokenizer.save_vocabulary(output_dir+args.output_dir)
