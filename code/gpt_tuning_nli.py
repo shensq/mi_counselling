@@ -78,8 +78,8 @@ def main():
     model = GPT2ClassHeadsModel.from_pretrained('gpt2')
     if USE_CUDA:
         model.cuda()
-    tokenizer = GPT2Tokenizer.from_pretrained(model_dir)
-    # tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+    # tokenizer = GPT2Tokenizer.from_pretrained(model_dir)
+    tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     print('Model loaded.')
     # =============== Load & process data ==============
     pickle_handler = open('../data_processed/x_y_meta', 'rb')
@@ -139,11 +139,11 @@ def main():
         for x,type_x,pos_x,lm_x,label in data_loader:
             if counter>0:
                 break
-            for i in range(x.shape[0]):
-                if label[i].item()==0:
-                    x[i,:].fill_(0)
-                else:
-                    x[i,:].fill_(1)
+            # for i in range(x.shape[0]):
+            #     if label[i].item()==0:
+            #         x[i,:].fill_(0)
+            #     else:
+            #         x[i,:].fill_(1)
             # counter+=1
             # print("Get data")
             loss,logits = model(x, position_ids=pos_x, token_type_ids=type_x, labels=label)
