@@ -1,6 +1,7 @@
 # Path to the pytorch checkpoint
 # /Users/shensq/Documents/LIT_ai_counseling/gpt2/models/pytorch_345M'
-
+import sys
+sys.path.insert(0,'/home/shensq/LIT/pip_package')
 import re
 import argparse
 import torch
@@ -73,9 +74,9 @@ def main():
 
     
     # ====== Load GPT2 model ========
-    model_dir = "/Users/shensq/Documents/LIT_ai_counseling/gpt2/models/pytorch_345M/"
-    # model = GPT2ClassHeadsModel.from_pretrained(model_dir)
-    model = GPT2ClassHeadsModel.from_pretrained('gpt2')
+    model_dir = "../models/" + args.model_dir
+    model = GPT2ClassHeadsModel.from_pretrained(model_dir)
+    # model = GPT2ClassHeadsModel.from_pretrained('gpt2')
     if USE_CUDA:
         model.cuda()
     tokenizer = GPT2Tokenizer.from_pretrained(model_dir)
@@ -91,8 +92,8 @@ def main():
 
     print("Dataset initialized.")
 
-    test_size  = int(len(gpt_data)*0.90)
-    val_size = int(len(gpt_data)*0.095)
+    test_size  = int(len(gpt_data)*0.10)
+    val_size = int(len(gpt_data)*0.05)
     gpt_train,gpt_test,gpt_val = torch.utils.data.random_split(gpt_data,[len(gpt_data)-test_size-val_size,test_size,val_size])
 
     data_loader = DataLoader(dataset=gpt_train,batch_size=args.train_batch_size,shuffle=True,drop_last=True,collate_fn=collate_fn_nli)
@@ -166,19 +167,19 @@ def main():
             # print(exp_average_loss)
         accuracy/=len(gpt_train)
         print("Accuracy for epoch {} is {}".format(epo,accuracy))
-        #
-        # # ==== Save the model ====
-        # # Save a trained model, configuration and tokenizer
-        # model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
-        #
-        # # If we save using the predefined names, we can load using `from_pretrained`
-        # output_dir = '/data/chuancen/LIT/models/'
-        # output_model_file = os.path.join(output_dir+args.output_dir, WEIGHTS_NAME)
-        # output_config_file = os.path.join(output_dir+args.output_dir, CONFIG_NAME)
-        #
-        # torch.save(model_to_save.state_dict(), output_model_file)
-        # model_to_save.config.to_json_file(output_config_file)
-        # tokenizer.save_vocabulary(output_dir+args.output_dir)
+        
+        # ==== Save the model ====
+        # Save a trained model, configuration and tokenizer
+        model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
+        
+        # If we save using the predefined names, we can load using `from_pretrained`
+        output_dir = '../models/'
+        output_model_file = os.path.join(output_dir+args.output_dir, WEIGHTS_NAME)
+        output_config_file = os.path.join(output_dir+args.output_dir, CONFIG_NAME)
+        
+        torch.save(model_to_save.state_dict(), output_model_file)
+        model_to_save.config.to_json_file(output_config_file)
+        tokenizer.save_vocabulary(output_dir+args.output_dir)
 
 
 if __name__ == '__main__':
