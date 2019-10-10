@@ -163,8 +163,7 @@ def main():
     tf_idf, tf, idf, word2index, index2word = get_tfidf(files, doc_utterances)
 
     x_y_meta_aug = []
-
-    for x, y, meta in tqdm(x_y_meta):
+    for x, y, meta in x_y_meta:
         query_tfidf = get_sentence_tfidf(x, word2index, idf)
         doc_score = tf_idf.T.dot(query_tfidf).reshape(len(files))
         top_k_idx = np.argsort(-doc_score)[0]  # pick only one doc
