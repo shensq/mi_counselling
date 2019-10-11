@@ -62,11 +62,11 @@ def main():
     # ====== Load GPT2 model ========
     model_dir = '../models/'+args.model_dir
     model = GPT2LMHeadModel.from_pretrained(model_dir)
-    # model = GPT2LMHeadModel.from_pretrained('gpt2-medium')
+    # model = GPT2LMHeadModel.from_pretrained('gpt2')
     if USE_CUDA:
         model.cuda()
     tokenizer = GPT2Tokenizer.from_pretrained(model_dir)
-    # tokenizer = GPT2Tokenizer.from_pretrained('gpt2-medium')
+    # tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     print('Model loaded.')
     # =============== Load & process data ==============
     # # folder = '/home/shensq/gpt_tuning/multiturns_data/'
@@ -132,7 +132,7 @@ def main():
                 x, type_x, pos_x, lm_x, x_len, _, keyword_x = sample
             else:
                 x, type_x, pos_x, lm_x, x_len, _ = sample
-                keyword_x = x
+                keyword_x = None
             input_len = x_len[0]
             if x_len[0] > 1023:
                 continue
