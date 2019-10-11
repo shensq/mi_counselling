@@ -335,14 +335,27 @@ class GptDataset_nli(GptDataset):
         if not augment:
             self.label = [1]*len(self.x_encoded)
         else:
-            self.label = [1]*len(self.x_encoded) + [0]*len(self.x_encoded)
-            self.x_encoded = self.x_encoded + copy.deepcopy(self.x_encoded)
-            self.y_encoded = list(self.y_encoded) + random.sample(copy.deepcopy(self.y_encoded), len(self.y_encoded))
+            self.pos_len = len(self.x_encoded)
+            # self.label = [1] * pos_len + [0] * (len(self.x_encoded) - pos_len) # set half to true, half to false
+            # self.x_encoded = list(self.x_encoded)
+            # for i in range(pos_len, len(self.x_encoded)):
+            #     self.x_encoded[i] = [list(range(20))] * 5
+            
+            # self.label = [1]*len(self.x_encoded) + [0]*len(self.x_encoded)
+            # self.x_encoded = self.x_encoded + copy.deepcopy(self.x_encoded)
+            # self.y_encoded = list(self.y_encoded) + random.sample(copy.deepcopy(self.y_encoded), len(self.y_encoded))
         # self.x_encoded,self.y_encoded,self.label = zip(*random.sample(list(zip(self.x_encoded,self.y_encoded,self.label)),len(self.x_encoded)))
+    def __len__(self):
+        return 2 * len(self.x_encoded)
 
     def __getitem__(self,index):
         # former utterances - premise -speaker1 
         # response - hypothesis - ref_start
+        true_index = index
+        if index >= self.pos_len:
+            # print('negative sample')
+            index = index - self.pos_len
+
         x = []
         type_x = []
         lm_x = []
@@ -359,18 +372,22 @@ class GptDataset_nli(GptDataset):
             is_speaker1 = not is_speaker1
 
         total_input_length = len(x)
-
-        x += [self.ref_start] + self.y_encoded[index] + [self.eos]
-
-        type_x += [self.ref_start]*(len(self.y_encoded[index])+2)
+        
+        if true_index > self.pos_len:
+            rand_index = random.randint(0,self.pos_len-1)
+            x += [self.ref_start] + self.y_encoded[rand_index] + [self.eos]
+            type_x += [self.ref_start]*(len(self.y_encoded[rand_index])+2)
+        else:
+            x += [self.ref_start] + self.y_encoded[index] + [self.eos]
+            type_x += [self.ref_start]*(len(self.y_encoded[index])+2)
         position_x = list(range(len(x)))
 
         x = torch.Tensor(x)
         type_x = torch.Tensor(type_x)
         position_x = torch.Tensor(position_x)
         x_len = x.shape[0]
-        
-        return x,type_x,position_x,lm_x,self.label[index]
+        label = torch.tensor(0) if true_index>self.pos_len else torch.tensor(1)
+        return x,type_x,position_x,lm_x, label
 
 class SnliDataset(Dataset):
     """Take a list of samples with form [[x,...],y,meta]
@@ -413,7 +430,6 @@ class SnliDataset(Dataset):
     def __init__(self,tokenizer,path='../data/snli_1.0/snli_1.0_test.jsonl',filter_mode=None,num_turns=5):
         
         self.data = self.parse_snli(path)
-        self.num_turns = num_turns
         self.tokenizer = tokenizer
         self.premise_encoded,self.hypothesis_encoded,self.label = self._split(self.data)
         self.premise_encoded,self.hypothesis_encoded,self.label = self._filter(self.premise_encoded,self.hypothesis_encoded,self.label,filter_mode)

@@ -20,6 +20,26 @@ from gpt_loader import GptDataset,collate_fn,GptDataset_aug, GptDataset_keyword,
 # OPTIONAL: if you want to have more information on what's happening, activate the logger as follows
 import logging
 
+def evaluate(model, data_loader, use_keyword=False):
+    model.eval()
+    eval_loss = 0
+    for sample in tqdm(data_loader):
+        if use_keyword:
+            x, type_x, pos_x, lm_x, x_len, _, keyword_x = sample
+        else:
+            x, type_x, pos_x, lm_x, x_len, _ = sample
+            keyword_x = None
+        input_len = x_len[0]
+        # if x_len[0] > 1023:
+        #     continue
+        # lm_x[:, x_len[0]+1+args.first_K_tokens:-1] = -1
+        loss = model(x, position_ids=pos_x, token_type_ids=type_x, labels=lm_x, key_word=keyword_x)[0]
+        eval_loss += loss.item()
+    eval_loss /= len(data_loader)
+    model.train()
+    return eval_loss
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_dir",default='345M_Alex',type=str,required=False,
@@ -94,8 +114,8 @@ def main():
         gpt_data = GptDataset(x_y_meta,tokenizer, args.output_dir, num_turns=args.num_turns) # use the output model name as pattern name
     print("Dataset initialized. There are {} samples.".format(len(gpt_data)))
 
-    test_size = int(len(gpt_data)*0.10)
-    val_size = int(len(gpt_data)*0.05)
+    test_size = int(len(gpt_data)*0.99)
+    val_size = int(len(gpt_data)*0.005)
     gpt_train, gpt_test, gpt_val = torch.utils.data.random_split(gpt_data, [len(gpt_data)-test_size-val_size, test_size, val_size])
 
     if args.keyword:
@@ -104,7 +124,7 @@ def main():
     else:
         data_loader = DataLoader(dataset=gpt_train, batch_size=args.train_batch_size, shuffle=True, drop_last=True,
                                  collate_fn=collate_fn)
-        test_loader = DataLoader(dataset=gpt_test, batch_size=4, shuffle=True, drop_last=True, collate_fn=collate_fn)
+        val_loader = DataLoader(dataset=gpt_val, batch_size=1, shuffle=False, drop_last=False, collate_fn=collate_fn)
 
     # ========== Prepare optimizer =============
 
@@ -149,6 +169,8 @@ def main():
             # exp_average_loss = loss.mean().item() if exp_average_loss is None else 0.7*exp_average_loss+0.3*loss.mean().item()
             # tqdm_bar.desc = "Training loss: {:.2e} lr: {:.2e}".format(exp_average_loss, optimizer.get_lr()[0])
             # print(exp_average_loss)
+        eval_loss = evaluate(model, val_loader)
+        print("Eval loss: {}".format(eval_loss))
 
         # ==== Save the model ====
         # Save a trained model, configuration and tokenizer

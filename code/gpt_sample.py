@@ -87,12 +87,14 @@ def sample_sequence(model, length, context, start_token=None, batch_size=1, modi
     past = None
 
     with torch.no_grad():
-        for _ in trange(length):
+        for i in trange(length):
             inputs = {'input_ids': generated, 'past': None, 'key_word': key_word}
             logits, past = model(**inputs)
             next_token_logits = logits[0, -1, :] / temperature
             filtered_logits = top_k_top_p_filtering(next_token_logits, top_k=top_k, top_p=top_p)
             next_token = torch.multinomial(F.softmax(filtered_logits, dim=-1), num_samples=1)
+            while (i == 0) and (next_token[0] == 50256):
+                next_token = torch.multinomial(F.softmax(filtered_logits, dim=-1), num_samples=1)
             generated = torch.cat((generated, next_token.unsqueeze(0)), dim=1)
             prev = next_token.unsqueeze(0)
             if next_token[0] in [50256]:
@@ -243,12 +245,8 @@ def run_model(args, model, tokenizer, test_loader):
             x, type_x, pos_x, lm_x, x_len, meta, keyword_x = sample
         else:
             x, type_x, pos_x, lm_x, x_len, meta = sample
-            keyword_x = x
+            keyword_x = None
         input_len = x_len[0] # The number of tokens of the context utterances
-        if i>=1e4:
-            break
-        print(i)
-
         context_tokens = x[0][:input_len+1] # at evaluation stage, the input is without the ground truth
         generated = 0
         for i in range(args.nsamples // args.batch_size):

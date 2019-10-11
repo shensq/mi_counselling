@@ -20,7 +20,7 @@ from model import GPT2ClassHeadsModel
 import logging
 
 def eval(data_loader, model):
-    tqdm_bar = tqdm(data_loader, desc="Evaluating")
+    # tqdm_bar = tqdm(data_loader, desc="Evaluating")
     accuracy = 0
     total = 0
     exp_average_loss = None
@@ -35,11 +35,12 @@ def eval(data_loader, model):
                 accuracy += 1
 
             exp_average_loss = loss.item() if exp_average_loss is None else 0.7 * exp_average_loss + 0.3 * loss.item()
-            tqdm_bar.update(1)
-            tqdm_bar.set_postfix(loss=exp_average_loss, correct=accuracy)
+            # tqdm_bar.update(1)
+            # tqdm_bar.set_postfix(loss=exp_average_loss, correct=accuracy)
 
     accuracy /= total
-    print("Accuracy is {}".format(accuracy))
+    model.train()
+    return accuracy
 
 def main():
     parser = argparse.ArgumentParser()
@@ -48,8 +49,8 @@ def main():
     parser.add_argument("--output_dir", default='mi_tuned', type=str, required=False,
                         help="The output directory where the model predictions and checkpoints will be written.")
     parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--num_train_epochs', type=int, default=5)
-    parser.add_argument('--train_batch_size', type=int, default=2)
+    parser.add_argument('--num_train_epochs', type=int, default=10)
+    parser.add_argument('--train_batch_size', type=int, default=8)
     parser.add_argument('--max_grad_norm', type=int, default=1)
     # parser.add_argument('--learning_rate', type=float, default=1e-3)
     parser.add_argument('--learning_rate', type=float, default=6.25e-5)
@@ -91,32 +92,35 @@ def main():
         gpt_data = GptDataset_nli(x_y_meta, tokenizer, augment=True)
 
     print("Dataset initialized.")
-
+    print("samples:", len(gpt_data))
     test_size  = int(len(gpt_data)*0.10)
     val_size = int(len(gpt_data)*0.05)
     gpt_train,gpt_test,gpt_val = torch.utils.data.random_split(gpt_data,[len(gpt_data)-test_size-val_size,test_size,val_size])
-
+    
     data_loader = DataLoader(dataset=gpt_train,batch_size=args.train_batch_size,shuffle=True,drop_last=True,collate_fn=collate_fn_nli)
-    test_loader = DataLoader(dataset=gpt_test, batch_size=1, shuffle=True, drop_last=True, collate_fn=collate_fn_nli)
-
+    test_loader = DataLoader(dataset=gpt_test, batch_size=1, shuffle=False, drop_last=False, collate_fn=collate_fn_nli)
+    val_loader = DataLoader(dataset=gpt_val, batch_size=1, shuffle=False, drop_last=False, collate_fn=collate_fn_nli)
     if args.eval:
-        eval(test_loader, model)
+        eval(val_loader, model)
         return
 
     # ========== Prepare optimizer =============
     param_optimizer = list(model.named_parameters())
     no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
     optimizer_grouped_parameters = [
-        {'params': [p for n, p in param_optimizer if 'classifier' in n and 'bias' not in n], 'weight_decay': 0.01, 'lr':5 * args.learning_rate},
-        {'params': [p for n, p in param_optimizer if 'classifier' in n and 'bias' in n], 'weight_decay': 0.00,'lr': 5 * args.learning_rate},
         {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay) and 'classifier' not in n], 'weight_decay': 0.01},
         {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay) and 'classifier' not in n], 'weight_decay': 0.0}
         ]
 
+    optimizer_grouped_parameters_classifier = [
+        {'params': [p for n, p in param_optimizer if 'classifier' in n and 'bias' not in n], 'weight_decay': 0.01, 'lr':5*args.learning_rate},
+        {'params': [p for n, p in param_optimizer if 'classifier' in n and 'bias' in n], 'weight_decay': 0.00,'lr': 5*args.learning_rate}
+    ]
     num_train_optimization_steps = len(gpt_train) * args.num_train_epochs // args.train_batch_size
     num_warmup_steps = int(num_train_optimization_steps) * 0.1
 
     optimizer = AdamW(optimizer_grouped_parameters,lr=args.learning_rate,correct_bias=True)
+    optimizer_classifier = AdamW(optimizer_grouped_parameters_classifier,lr=args.learning_rate,correct_bias=True)
     # scheduler = pytorch_transformers.optimization.WarmupCosineSchedule(optimizer, warmup_steps=num_warmup_steps, t_total=num_train_optimization_steps,cycles=1.5)
     scheduler = pytorch_transformers.optimization.WarmupLinearSchedule(optimizer, warmup_steps=num_warmup_steps, t_total=num_train_optimization_steps)
 
@@ -124,11 +128,18 @@ def main():
     print("Start training.")
     model.train()
     exp_average_loss = None
-
-    for epo in trange(int(args.num_train_epochs), desc="Epoch"):
+    old_val_accuracy = 0 
+    # for epo in trange(int(args.num_train_epochs), desc="Epoch"):
+    for epo in range(int(args.num_train_epochs)):
         tqdm_bar = tqdm(data_loader, desc="Training")
         accuracy = 0 
         for x,type_x,pos_x,lm_x,label in data_loader:
+            # import pdb;pdb.set_trace()
+            # for i in range(x.shape[0]):
+            #     if label[i].item()==0:
+            #         x[i].fill_(0)
+            #     else:
+            #         x[i].fill_(1)
             loss,logits = model(x, position_ids=pos_x, token_type_ids=type_x, labels=label)
             pred = torch.argmax(logits, dim=1)
             for i in range(x.shape[0]):
@@ -136,27 +147,34 @@ def main():
                     accuracy += 1
             loss.backward()
             optimizer.step()
+            optimizer_classifier.step()
             scheduler.step()
             optimizer.zero_grad()
+            optimizer_classifier.zero_grad()
             exp_average_loss = loss.item() if exp_average_loss is None else 0.7*exp_average_loss+0.3*loss.item()
             tqdm_bar.update(1)
             tqdm_bar.set_postfix(loss=exp_average_loss,correct=accuracy)
 
         accuracy/=len(gpt_train)
-        print("Accuracy for epoch {} is {}".format(epo,accuracy))
-        
+        print("Accuracy for epoch {} is {}.\t Average loss:{}".format(epo,accuracy,exp_average_loss))
+        val_accuracy = eval(val_loader, model)
+        print("Eval accuracy: {}".format(val_accuracy))
+        if val_accuracy < old_val_accuracy:
+            print("val accuracy decreasing!")
+            old_val_accuracy = val_accuracy
         # ==== Save the model ====
-        # Save a trained model, configuration and tokenizer
-        model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
+        if True:
+            # Save a trained model, configuration and tokenizer
+            model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
 
-        # If we save using the predefined names, we can load using `from_pretrained`
-        output_dir = '../models/'
-        output_model_file = os.path.join(output_dir+args.output_dir, WEIGHTS_NAME)
-        output_config_file = os.path.join(output_dir+args.output_dir, CONFIG_NAME)
+            # If we save using the predefined names, we can load using `from_pretrained`
+            output_dir = '../models/'
+            output_model_file = os.path.join(output_dir+args.output_dir, WEIGHTS_NAME)
+            output_config_file = os.path.join(output_dir+args.output_dir, CONFIG_NAME)
 
-        torch.save(model_to_save.state_dict(), output_model_file)
-        model_to_save.config.to_json_file(output_config_file)
-        tokenizer.save_vocabulary(output_dir+args.output_dir)
+            torch.save(model_to_save.state_dict(), output_model_file)
+            model_to_save.config.to_json_file(output_config_file)
+            tokenizer.save_vocabulary(output_dir+args.output_dir)
 
 
 if __name__ == '__main__':
