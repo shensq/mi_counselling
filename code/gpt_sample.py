@@ -209,7 +209,10 @@ def load_model_data(args):
         x_y_meta = pickle.load(pickle_handler)
         gpt_data = GptDataset_keyword(x_y_meta, tokenizer)
     else:
-        pickle_handler = open('../data_processed/'+args.special_input, 'rb')
+        if args.special_input:
+            pickle_handler = open('../data_processed/'+args.special_input, 'rb')
+        else:
+            pickle_handler = open('../data_processed/x_y_meta', 'rb')
         x_y_meta = pickle.load(pickle_handler)
         gpt_data = GptDataset(x_y_meta,tokenizer,args.output_dir, num_turns=args.num_turns) # use the output model name as pattern name
 
@@ -330,7 +333,7 @@ if __name__ == '__main__':
     parser.add_argument('--output_dir',type=str,default='generate', help="The name of the output file.")
     parser.add_argument('--modified_decoding', action='store_true')
     parser.add_argument('--augment', action='store_true')
-    parser.add_argument('--special_input',type=str,default='x_y_meta')
+    parser.add_argument('--special_input',type=str)
     parser.add_argument('--keyword', action='store_true')
     parser.add_argument('--num_turns', type=int, default=5)
     args = parser.parse_args()
@@ -351,7 +354,7 @@ if __name__ == '__main__':
     with open("../data_processed/rouge_rank_" + args.model_dir,'wb') as f:
         pickle.dump(sample_ranked, f)
     calculate_metric(hyp, ref, context)
-    calculate_metric(hyp, ref, context, 5)
+    # calculate_metric(hyp, ref, context, 5)
 
 
 

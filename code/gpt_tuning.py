@@ -116,7 +116,7 @@ def parse_arguments():
     parser.add_argument('--n_valid', type=int, default=374)
     parser.add_argument('--augment', action='store_true')
     parser.add_argument('--keyword', action='store_true')
-    parser.add_argument('--special_input', type=str, default='x_y_meta')
+    parser.add_argument('--special_input', type=str)
     parser.add_argument('--first_K_tokens', type=int, default=1024)
     parser.add_argument('--use_disc_lr', action='store_true')
     parser.add_argument('--use_unfreezing', action='store_true')
