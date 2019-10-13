@@ -20,7 +20,43 @@ from gpt_loader import GptDataset,collate_fn,GptDataset_aug, GptDataset_keyword,
 # OPTIONAL: if you want to have more information on what's happening, activate the logger as follows
 import logging
 
-def evaluate(model, data_loader, use_keyword=False):
+def get_data(args, tokenizer):
+    if args.augment:
+        print("Using augmented data")
+        pickle_handler = open('../data_processed/x_y_meta_aug','rb')
+        x_y_meta = pickle.load(pickle_handler)
+        gpt_data = GptDataset_aug(x_y_meta,tokenizer)
+    elif args.keyword:
+        print("Using keyword cross attention")
+        pickle_handler = open('../data_processed/x_y_meta_keyword','rb')
+        x_y_meta = pickle.load(pickle_handler)
+        gpt_data = GptDataset_keyword(x_y_meta, tokenizer)
+    else:
+        if args.special_input != 'x_y_meta':
+            print("Using mutated data.")
+            pickle_handler = open('../data_processed/'+args.special_input, 'rb')
+        else:
+            pickle_handler = open('../data_processed/x_y_meta', 'rb')
+        x_y_meta = pickle.load(pickle_handler)
+        gpt_data = GptDataset(x_y_meta,tokenizer, args.output_dir, num_turns=args.num_turns) # use the output model name as pattern name
+    print("Dataset initialized. There are {} samples.".format(len(gpt_data)))
+
+    test_size = int(len(gpt_data)*0.10)
+    val_size = int(len(gpt_data)*0.05)
+    gpt_train, gpt_test, gpt_val = torch.utils.data.random_split(gpt_data, [len(gpt_data)-test_size-val_size, test_size, val_size])
+
+    if args.keyword:
+        data_loader = DataLoader(dataset=gpt_train, batch_size=args.train_batch_size, shuffle=True, drop_last=True,
+                                 collate_fn=collate_fn_keyword)
+        val_loader = DataLoader(dataset=gpt_val, batch_size=1, shuffle=False, drop_last=False, collate_fn=collate_fn_keyword)
+    else:
+        data_loader = DataLoader(dataset=gpt_train, batch_size=args.train_batch_size, shuffle=True, drop_last=True,
+                                 collate_fn=collate_fn)
+        val_loader = DataLoader(dataset=gpt_val, batch_size=1, shuffle=False, drop_last=False, collate_fn=collate_fn)
+    return data_loader, val_loader
+
+
+def evaluate(model, data_loader, use_keyword=None):
     model.eval()
     eval_loss = 0
     for sample in tqdm(data_loader):
@@ -33,7 +69,7 @@ def evaluate(model, data_loader, use_keyword=False):
         # if x_len[0] > 1023:
         #     continue
         # lm_x[:, x_len[0]+1+args.first_K_tokens:-1] = -1
-        loss = model(x, position_ids=pos_x, token_type_ids=type_x, labels=lm_x, key_word=keyword_x)[0]
+        loss = model(x, position_ids=pos_x, token_type_ids=type_x, labels=lm_x, key_word=keyword_x, use_keyword=use_keyword)[0]
         eval_loss += loss.item()
     eval_loss /= len(data_loader)
     model.train()
@@ -47,7 +83,7 @@ def main():
     parser.add_argument("--output_dir", default='mi_tuned', type=str, required=False,
                         help="The output directory where the model predictions and checkpoints will be written.")
     parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--num_train_epochs', type=int, default=3)
+    parser.add_argument('--num_train_epochs', type=int, default=1)
     parser.add_argument('--train_batch_size', type=int, default=1)
     parser.add_argument('--max_grad_norm', type=int, default=1)
     parser.add_argument('--learning_rate', type=float, default=6.25e-5)
@@ -93,39 +129,7 @@ def main():
     # folder = '../data_processed/'
     # x_flat = pickle.load(open(folder+'x_flat','rb'))
     # y_all_join = pickle.load(open(folder+'y_all_join','rb'))
-
-    if args.augment:
-        print("Using augmented data")
-        pickle_handler = open('../data_processed/x_y_meta_aug','rb')
-        x_y_meta = pickle.load(pickle_handler)
-        gpt_data = GptDataset_aug(x_y_meta,tokenizer)
-    elif args.keyword:
-        print("Using keyword cross attention")
-        pickle_handler = open('../data_processed/x_y_meta_keyword','rb')
-        x_y_meta = pickle.load(pickle_handler)
-        gpt_data = GptDataset_keyword(x_y_meta, tokenizer)
-    else:
-        if args.special_input != 'x_y_meta':
-            print("Using mutated data.")
-            pickle_handler = open('../data_processed/'+args.special_input, 'rb')
-        else:
-            pickle_handler = open('../data_processed/x_y_meta_10turn', 'rb')
-        x_y_meta = pickle.load(pickle_handler)
-        gpt_data = GptDataset(x_y_meta,tokenizer, args.output_dir, num_turns=args.num_turns) # use the output model name as pattern name
-    print("Dataset initialized. There are {} samples.".format(len(gpt_data)))
-
-    test_size = int(len(gpt_data)*0.99)
-    val_size = int(len(gpt_data)*0.005)
-    gpt_train, gpt_test, gpt_val = torch.utils.data.random_split(gpt_data, [len(gpt_data)-test_size-val_size, test_size, val_size])
-
-    if args.keyword:
-        data_loader = DataLoader(dataset=gpt_train, batch_size=args.train_batch_size, shuffle=True, drop_last=True,
-                                 collate_fn=collate_fn_keyword)
-    else:
-        data_loader = DataLoader(dataset=gpt_train, batch_size=args.train_batch_size, shuffle=True, drop_last=True,
-                                 collate_fn=collate_fn)
-        val_loader = DataLoader(dataset=gpt_val, batch_size=1, shuffle=False, drop_last=False, collate_fn=collate_fn)
-
+    data_loader, val_loader = get_data()
     # ========== Prepare optimizer =============
 
     param_optimizer = list(model.named_parameters()) # the gpt2 model from library has unnamed LM head. LM head's weights are tied to input embedding
@@ -145,9 +149,13 @@ def main():
     print("Start training.")
     model.train()
     exp_average_loss = None
-    progress_bar = trange(int(args.num_train_epochs), desc="Epoch", leave=True)
-    for _ in progress_bar:
-        for sample in tqdm(data_loader):
+    # progress_bar = trange(int(args.num_train_epochs), desc="Epoch", leave=True)
+    min_eval_loss = 100 # large enough number
+    early_terminate_counter = 0 
+    #for _ in progress_bar:
+    for _ in range(int(args.num_train_epochs)):
+        # for sample in tqdm(data_loader):
+        for sample in data_loader:
             if args.keyword:
                 x, type_x, pos_x, lm_x, x_len, _, keyword_x = sample
             else:
@@ -158,32 +166,41 @@ def main():
                 continue
             
             lm_x[:, x_len[0]+1+args.first_K_tokens:-1] = -1
-            loss = model(x, position_ids=pos_x, token_type_ids=type_x, labels=lm_x, key_word=keyword_x)[0]
+            loss = model(x, position_ids=pos_x, token_type_ids=type_x, labels=lm_x, key_word=keyword_x, use_keyword=args.keyword)[0]
             loss.backward()
             optimizer.step()
             scheduler.step()
             # print("loss BP")
             optimizer.zero_grad()
             exp_average_loss = loss.item() if exp_average_loss is None else 0.7*exp_average_loss+0.3*loss.item()
-            progress_bar.set_description("Training loss: {}".format(exp_average_loss))
+            # progress_bar.set_description("Training loss: {}".format(exp_average_loss))
             # exp_average_loss = loss.mean().item() if exp_average_loss is None else 0.7*exp_average_loss+0.3*loss.mean().item()
             # tqdm_bar.desc = "Training loss: {:.2e} lr: {:.2e}".format(exp_average_loss, optimizer.get_lr()[0])
             # print(exp_average_loss)
-        eval_loss = evaluate(model, val_loader)
+        eval_loss = evaluate(model, val_loader, use_keyword=args.keyword)
         print("Eval loss: {}".format(eval_loss))
+        if eval_loss < min_eval_loss: # save the model only when the loss is the smallest
+            early_terminate_counter = 0
+            min_eval_loss = eval_loss
 
-        # ==== Save the model ====
-        # Save a trained model, configuration and tokenizer
-        model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
+            # ==== Save the model ====
+            # Save a trained model, configuration and tokenizer
+            model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
 
-        # If we save using the predefined names, we can load using `from_pretrained`
-        output_dir = '../models/'
-        output_model_file = os.path.join(output_dir+args.output_dir, WEIGHTS_NAME)
-        output_config_file = os.path.join(output_dir+args.output_dir, CONFIG_NAME)
+            # If we save using the predefined names, we can load using `from_pretrained`
+            output_dir = '../models/'
+            output_model_file = os.path.join(output_dir+args.output_dir, WEIGHTS_NAME)
+            output_config_file = os.path.join(output_dir+args.output_dir, CONFIG_NAME)
 
-        torch.save(model_to_save.state_dict(), output_model_file)
-        model_to_save.config.to_json_file(output_config_file)
-        tokenizer.save_vocabulary(output_dir+args.output_dir)
+            torch.save(model_to_save.state_dict(), output_model_file)
+            model_to_save.config.to_json_file(output_config_file)
+            tokenizer.save_vocabulary(output_dir+args.output_dir)
+        else:
+            print("eval loss increasing!")
+            early_terminate_counter += 1
+            if early_terminate_counter > 5: # if the eval loss does not decrease for 5 epochs, terminate early.
+                return
+
 
 
 if __name__ == '__main__':

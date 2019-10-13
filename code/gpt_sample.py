@@ -79,7 +79,7 @@ def top_k_top_p_filtering(logits, top_k=0, top_p=0.0, filter_value=-float('Inf')
 
 def sample_sequence(model, length, context, start_token=None, batch_size=1, modified_decoding=False,
                         value_word_relation=None, meta=None, key_word=None, num_samples=1, temperature=1,
-                        top_k=0, top_p=0.0, device='cuda'):
+                        top_k=0, top_p=0.0, device='cuda', use_keyword=None):
     context = torch.tensor(context, dtype=torch.long, device=device)
     context = context.unsqueeze(0).repeat(num_samples, 1)
     generated = context
@@ -88,7 +88,7 @@ def sample_sequence(model, length, context, start_token=None, batch_size=1, modi
 
     with torch.no_grad():
         for i in trange(length):
-            inputs = {'input_ids': generated, 'past': None, 'key_word': key_word}
+            inputs = {'input_ids': generated, 'past': None, 'key_word': key_word, 'use_keyword':use_keyword}
             logits, past = model(**inputs)
             next_token_logits = logits[0, -1, :] / temperature
             filtered_logits = top_k_top_p_filtering(next_token_logits, top_k=top_k, top_p=top_p)
@@ -259,7 +259,7 @@ def run_model(args, model, tokenizer, test_loader):
                 start_token=None,
                 batch_size=args.batch_size,
                 temperature=args.temperature, top_k=args.top_k, modified_decoding=args.modified_decoding,
-                value_word_relation=None,device=device,meta=meta[0][0], key_word=keyword_x # an extra index for *meta
+                value_word_relation=None,device=device,meta=meta[0][0], key_word=keyword_x, use_keyword=args.keyword
             )           
             out = out[:, len(context_tokens):-1].tolist() # the generated result,get rid of eos
 
@@ -330,7 +330,7 @@ if __name__ == '__main__':
     parser.add_argument('--output_dir',type=str,default='generate', help="The name of the output file.")
     parser.add_argument('--modified_decoding', action='store_true')
     parser.add_argument('--augment', action='store_true')
-    parser.add_argument('--special_input',type=str,default='x_y_meta_10turn')
+    parser.add_argument('--special_input',type=str,default='x_y_meta')
     parser.add_argument('--keyword', action='store_true')
     parser.add_argument('--num_turns', type=int, default=5)
     args = parser.parse_args()

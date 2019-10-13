@@ -27,7 +27,7 @@ def eval(data_loader, model):
     model.eval()
 
     with torch.no_grad():
-        for x, type_x, pos_x, lm_x, label in data_loader:
+        for x, type_x, pos_x, lm_x, label in tqdm(data_loader):
             loss, logits = model(x, position_ids=pos_x, token_type_ids=type_x, labels=label)
 
             total += 1
@@ -76,12 +76,12 @@ def main():
     
     # ====== Load GPT2 model ========
     model_dir = "../models/" + args.model_dir
-    # model = GPT2ClassHeadsModel.from_pretrained(model_dir)
-    model = GPT2ClassHeadsModel.from_pretrained('gpt2')
+    model = GPT2ClassHeadsModel.from_pretrained(model_dir)
+    # model = GPT2ClassHeadsModel.from_pretrained('gpt2')
     if USE_CUDA:
         model.cuda()
-    # tokenizer = GPT2Tokenizer.from_pretrained(model_dir)
-    tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+    tokenizer = GPT2Tokenizer.from_pretrained(model_dir)
+    # tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     print('Model loaded.')
     # =============== Load & process data ==============
     pickle_handler = open('../data_processed/x_y_meta', 'rb')
@@ -101,7 +101,7 @@ def main():
     test_loader = DataLoader(dataset=gpt_test, batch_size=1, shuffle=False, drop_last=False, collate_fn=collate_fn_nli)
     val_loader = DataLoader(dataset=gpt_val, batch_size=1, shuffle=False, drop_last=False, collate_fn=collate_fn_nli)
     if args.eval:
-        eval(val_loader, model)
+        print(eval(val_loader, model))
         return
 
     # ========== Prepare optimizer =============
@@ -113,8 +113,8 @@ def main():
         ]
 
     optimizer_grouped_parameters_classifier = [
-        {'params': [p for n, p in param_optimizer if 'classifier' in n and 'bias' not in n], 'weight_decay': 0.01, 'lr':5*args.learning_rate},
-        {'params': [p for n, p in param_optimizer if 'classifier' in n and 'bias' in n], 'weight_decay': 0.00,'lr': 5*args.learning_rate}
+        {'params': [p for n, p in param_optimizer if 'classifier' in n and 'bias' not in n], 'weight_decay': 0.01, 'lr':args.learning_rate},
+        {'params': [p for n, p in param_optimizer if 'classifier' in n and 'bias' in n], 'weight_decay': 0.00,'lr': args.learning_rate}
     ]
     num_train_optimization_steps = len(gpt_train) * args.num_train_epochs // args.train_batch_size
     num_warmup_steps = int(num_train_optimization_steps) * 0.1
@@ -128,10 +128,13 @@ def main():
     print("Start training.")
     model.train()
     exp_average_loss = None
-    old_val_accuracy = 0 
+    max_eval_accuracy = 0 
+    early_terminate_counter = 0
+    train_losses = []
+    eval_losses = []
     # for epo in trange(int(args.num_train_epochs), desc="Epoch"):
     for epo in range(int(args.num_train_epochs)):
-        tqdm_bar = tqdm(data_loader, desc="Training")
+        # tqdm_bar = tqdm(data_loader, desc="Training")
         accuracy = 0 
         for x,type_x,pos_x,lm_x,label in data_loader:
             # import pdb;pdb.set_trace()
@@ -152,18 +155,26 @@ def main():
             optimizer.zero_grad()
             optimizer_classifier.zero_grad()
             exp_average_loss = loss.item() if exp_average_loss is None else 0.7*exp_average_loss+0.3*loss.item()
-            tqdm_bar.update(1)
-            tqdm_bar.set_postfix(loss=exp_average_loss,correct=accuracy)
+            # tqdm_bar.update(1)
+            # tqdm_bar.set_postfix(loss=exp_average_loss,correct=accuracy)
 
         accuracy/=len(gpt_train)
         print("Accuracy for epoch {} is {}.\t Average loss:{}".format(epo,accuracy,exp_average_loss))
-        val_accuracy = eval(val_loader, model)
-        print("Eval accuracy: {}".format(val_accuracy))
-        if val_accuracy < old_val_accuracy:
-            print("val accuracy decreasing!")
-            old_val_accuracy = val_accuracy
-        # ==== Save the model ====
-        if True:
+        train_losses.append([accuracy, exp_average_loss])
+
+        eval_accuracy = eval(val_loader, model)
+        print("Eval accuracy: {}".format(eval_accuracy))
+        eval_losses.append(eval_accuracy)
+
+        if eval_accuracy < max_eval_accuracy:
+            print("eval accuracy decreasing!")
+            early_terminate_counter += 1
+            if early_terminate_counter > 10:
+                break
+        else:
+            early_terminate_counter = 0
+            max_eval_accuracy = eval_accuracy
+            # ==== Save the model ====
             # Save a trained model, configuration and tokenizer
             model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
 
@@ -175,6 +186,10 @@ def main():
             torch.save(model_to_save.state_dict(), output_model_file)
             model_to_save.config.to_json_file(output_config_file)
             tokenizer.save_vocabulary(output_dir+args.output_dir)
+    with open(output_dir+'exp_info.txt', 'wb') as f:
+        d = {'args':args,'train_info':train_losses,'eval_info':eval_accuracy}
+        pickle.dump(d, f)
+                
 
 
 if __name__ == '__main__':

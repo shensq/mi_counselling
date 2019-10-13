@@ -427,7 +427,7 @@ class SnliDataset(Dataset):
         data_processed = [(line['sentence1'],line['sentence2'],line['gold_label']) for line in data]
         return data_processed
 
-    def __init__(self,tokenizer,path='../data/snli_1.0/snli_1.0_test.jsonl',filter_mode=None,num_turns=5):
+    def __init__(self,tokenizer,path='../data/snli_1.0/snli_1.0_train.jsonl',filter_mode=None,num_turns=5):
         
         self.data = self.parse_snli(path)
         self.tokenizer = tokenizer
