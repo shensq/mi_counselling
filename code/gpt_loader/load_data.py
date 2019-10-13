@@ -332,21 +332,14 @@ class GptDataset_keyword(Dataset):
 class GptDataset_nli(GptDataset):
     def __init__(self, x_y_meta, tokenizer, filter_mode=None,num_turns=5,augment=True):
         super(GptDataset_nli, self).__init__(x_y_meta,tokenizer)
-        if not augment:
-            self.label = [1]*len(self.x_encoded)
-        else:
-            self.pos_len = len(self.x_encoded)
-            # self.label = [1] * pos_len + [0] * (len(self.x_encoded) - pos_len) # set half to true, half to false
-            # self.x_encoded = list(self.x_encoded)
-            # for i in range(pos_len, len(self.x_encoded)):
-            #     self.x_encoded[i] = [list(range(20))] * 5
-            
-            # self.label = [1]*len(self.x_encoded) + [0]*len(self.x_encoded)
-            # self.x_encoded = self.x_encoded + copy.deepcopy(self.x_encoded)
-            # self.y_encoded = list(self.y_encoded) + random.sample(copy.deepcopy(self.y_encoded), len(self.y_encoded))
-        # self.x_encoded,self.y_encoded,self.label = zip(*random.sample(list(zip(self.x_encoded,self.y_encoded,self.label)),len(self.x_encoded)))
+        self.augment = augment
+        self.pos_len = len(self.x_encoded)
+
     def __len__(self):
-        return 2 * len(self.x_encoded)
+        if self.augment:
+            return 2 * len(self.x_encoded)
+        else:
+            return len(self.x_encoded)
 
     def __getitem__(self,index):
         # former utterances - premise -speaker1 
