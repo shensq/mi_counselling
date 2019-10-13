@@ -34,20 +34,33 @@ def get_unfreezing_funcs(optimizer_grouped_parameters, warmup_portion, total_ste
 def construct_grouped_parameters(param_optimizer, learning_rate, use_discr=True):
     # discriminative lr
     optimizer_grouped_parameters = []
-    all_name = []
-    no_decay = ['bias', 'ln_']
+    weight_decay = 0.01
+    lr_decay_rate =0.9
+    num_blocks = 24
+    # no_decay = ['bias', 'ln_']
+    no_decay = ['bias', 'LayerNorm.weight']
     need_decay = lambda n: not any(nd in n for nd in no_decay)
     in_block = lambda name, i: "h.{}.".format(i) in name
 
-    num_blocks = 24
+    if use_discr:
+        embedding_lr = learning_rate * (lr_decay_rate ** num_blocks)
+    else:
+        embedding_lr = learning_rate
+    group = {'params': [p for n, p in param_optimizer if 'wte' in n],
+             'lr': embedding_lr, 'tag': "wte", 'weight_decay': weight_decay}
+    optimizer_grouped_parameters.append(group)
+
+    group = {'params': [p for n, p in param_optimizer if 'wpe' in n],
+             'lr': embedding_lr, 'tag': "wpe", 'weight_decay': weight_decay}
+    optimizer_grouped_parameters.append(group)
+
     for i in range(num_blocks):
         tag = "h.{}.".format(i)
         if use_discr:
-            lr = learning_rate * (0.9 ** (num_blocks - i))
+            lr = learning_rate * (lr_decay_rate ** (num_blocks - i))
         else:
             lr = learning_rate
-
-        group = {'lr': lr, 'tag': tag, 'weight_decay': 0.01}
+        group = {'lr': lr, 'tag': tag, 'weight_decay': weight_decay}
         group['params'] = [p for n, p in param_optimizer if need_decay(n) and in_block(n, i)]
         optimizer_grouped_parameters.append(group)
 
@@ -55,18 +68,12 @@ def construct_grouped_parameters(param_optimizer, learning_rate, use_discr=True)
         group['params'] = [p for n, p in param_optimizer if not need_decay(n) and in_block(n, i)]
         optimizer_grouped_parameters.append(group)
 
-    group = {}
-    group['params'] = [p for n, p in param_optimizer if "ln_f.weight" in n]
-    group['weight_decay'] = 0.01
-    group['lr'] = learning_rate
-    group['tag'] = "ln_f"
+    group = {'params': [p for n, p in param_optimizer if "ln_f.weight" in n],
+             'lr': learning_rate, 'tag': "ln_f", 'weight_decay': weight_decay}
     optimizer_grouped_parameters.append(group)
 
-    group = {}
-    group['params'] = [p for n, p in param_optimizer if "ln_f.bias" in n]
-    group['weight_decay'] = 0
-    group['lr'] = learning_rate
-    group['tag'] = "ln_f"
+    group = {'params': [p for n, p in param_optimizer if "ln_f.bias" in n],
+             'lr': learning_rate, 'tag': "ln_f", 'weight_decay': 0}
     optimizer_grouped_parameters.append(group)
 
     return optimizer_grouped_parameters
