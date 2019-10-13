@@ -373,7 +373,7 @@ class GptDataset_nli(GptDataset):
 
         total_input_length = len(x)
         
-        if true_index > self.pos_len:
+        if true_index >= self.pos_len:
             rand_index = random.randint(0,self.pos_len-1)
             x += [self.ref_start] + self.y_encoded[rand_index] + [self.eos]
             type_x += [self.ref_start]*(len(self.y_encoded[rand_index])+2)

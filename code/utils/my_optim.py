@@ -21,7 +21,6 @@ def get_unfreezing_funcs(optimizer_grouped_parameters, warmup_portion, total_ste
     lm_funcs = []
     for group in optimizer_grouped_parameters:
         tag = group['tag']
-        print(tag)
         if tag == 'wte' or tag == 'wpe':
             lm_funcs.append(get_lr_lambda(-1, use_unfreezing))
         elif tag == 'ln_f':

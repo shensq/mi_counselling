@@ -41,7 +41,7 @@ def get_data(args, tokenizer, split_size):
         pickle_handler = open('../data_processed/x_y_meta_keyword', 'rb')
         x_y_meta = pickle.load(pickle_handler)
         gpt_data = GptDataset_keyword(x_y_meta, tokenizer)
-    elif args.special_input != 'x_y_meta':
+    elif args.special_input:
         print("Using mutated data.")
         pickle_handler = open('../data_processed/' + args.special_input, 'rb')
         x_y_meta = pickle.load(pickle_handler)
@@ -205,7 +205,8 @@ def main():
 
         eval_loss = evaluate(model, val_loader, use_keyword=args.keyword)
         print("Eval loss: {}".format(eval_loss))
-        if eval_loss < min_eval_loss:  # save the model only when the loss is the smallest
+        # if eval_loss < min_eval_loss:  # save the model only when the loss is the smallest
+        if True:
             early_terminate_counter = 0
             min_eval_loss = eval_loss
             # ==== Save the model ====
