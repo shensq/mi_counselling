@@ -126,7 +126,7 @@ class GptDataset_aug(Dataset):
         x += [self.augment] + self.aug_encoded[index]
         type_x += [self.augment] * len(x)
 
-        is_speaker1 = bool(len(self.x_encoded[index])%2) # which speaker start the conversation
+        is_speaker1 = bool(self.num_turns % 2) # which speaker start the conversation
 
         for utt in self.x_encoded[index][-self.num_turns:]:
             if is_speaker1: # add the prefix special token for each utterance
