@@ -128,7 +128,7 @@ class GptDataset_aug(Dataset):
 
         is_speaker1 = bool(len(self.x_encoded[index])%2) # which speaker start the conversation
 
-        for utt in self.x_encoded[index]:
+        for utt in self.x_encoded[index][-self.num_turns:]:
             if is_speaker1: # add the prefix special token for each utterance
                 x+=[self.speaker1]
                 type_x += [self.speaker1]*(len(utt)+1)
@@ -331,7 +331,7 @@ class GptDataset_keyword(Dataset):
 
 class GptDataset_nli(GptDataset):
     def __init__(self, x_y_meta, tokenizer, filter_mode=None,num_turns=5,augment=True):
-        super(GptDataset_nli, self).__init__(x_y_meta,tokenizer)
+        super(GptDataset_nli, self).__init__(x_y_meta,tokenizer, num_turns=num_turns)
         self.augment = augment
         self.pos_len = len(self.x_encoded)
 
@@ -342,26 +342,27 @@ class GptDataset_nli(GptDataset):
             return len(self.x_encoded)
 
     def __getitem__(self,index):
-        # former utterances - premise -speaker1 
+        # client utterances - premise -speaker1 
         # response - hypothesis - ref_start
         true_index = index
         if index >= self.pos_len:
-            # print('negative sample')
             index = index - self.pos_len
 
         x = []
         type_x = []
         lm_x = []
         is_speaker1 = bool(len(self.x_encoded[index])%2) # which speaker start the conversation
-
-        for utt in self.x_encoded[index]:
+        
+        x+=[self.speaker1]
+        type_x += [self.speaker1]
+        for utt in self.x_encoded[index][-self.num_turns:]:
             if is_speaker1: # add the prefix special token for each utterance
-                x+=[self.speaker1]
-                type_x += [self.speaker1]*(len(utt)+1)
-            else:
-                x+=[self.speaker2]
-                type_x += [self.speaker2]*(len(utt)+1)
-            x += utt
+                type_x += [self.speaker1]*(len(utt))
+                x += utt
+            # else:
+            #     x+=[self.speaker2]
+            #     type_x += [self.speaker2]*(len(utt)+1)
+            #     x += utt
             is_speaker1 = not is_speaker1
 
         total_input_length = len(x)

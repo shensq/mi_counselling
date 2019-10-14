@@ -201,7 +201,7 @@ def load_model_data(args):
         print("Using augmented data.")
         pickle_handler = open('../data_processed/x_y_meta_aug','rb')
         x_y_meta = pickle.load(pickle_handler)
-        gpt_data = GptDataset_aug(x_y_meta,tokenizer) # use the name of output, it is depend on how is the trained model
+        gpt_data = GptDataset_aug(x_y_meta,tokenizer,num_turns=args.num_turns) # use the name of output, it is depend on how is the trained model
     elif args.keyword:
         print("Using keyword cross attention")
         pickle_handler = open('../data_processed/x_y_meta_keyword', 'rb')

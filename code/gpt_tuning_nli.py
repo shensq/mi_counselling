@@ -84,12 +84,14 @@ def main():
     # tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     print('Model loaded.')
     # =============== Load & process data ==============
-    pickle_handler = open('../data_processed/x_y_meta', 'rb')
+    pickle_handler = open('../data_processed/x_y_meta_10turn', 'rb')
     x_y_meta = pickle.load(pickle_handler)
     if args.snli:
+        print("Using SNLI data.")
         gpt_data = SnliDataset(tokenizer)  # use the output model name as pattern name
     else:
-        gpt_data = GptDataset_nli(x_y_meta, tokenizer, augment=True)
+        print("Using mi data.")
+        gpt_data = GptDataset_nli(x_y_meta, tokenizer, augment=True, num_turns=10)
 
     print("Dataset initialized.")
     print("samples:", len(gpt_data))
@@ -101,7 +103,7 @@ def main():
     test_loader = DataLoader(dataset=gpt_test, batch_size=1, shuffle=False, drop_last=False, collate_fn=collate_fn_nli)
     val_loader = DataLoader(dataset=gpt_val, batch_size=1, shuffle=False, drop_last=False, collate_fn=collate_fn_nli)
     if args.eval:
-        print(eval(val_loader, model))
+        print(eval(test_loader, model))
         return
 
     # ========== Prepare optimizer =============
@@ -132,9 +134,9 @@ def main():
     early_terminate_counter = 0
     train_losses = []
     eval_losses = []
-    # for epo in trange(int(args.num_train_epochs), desc="Epoch"):
-    for epo in range(int(args.num_train_epochs)):
-        # tqdm_bar = tqdm(data_loader, desc="Training")
+    for epo in trange(int(args.num_train_epochs), desc="Epoch"):
+    # for epo in range(int(args.num_train_epochs)):
+        tqdm_bar = tqdm(data_loader, desc="Training")
         accuracy = 0 
         for x,type_x,pos_x,lm_x,label in data_loader:
             # import pdb;pdb.set_trace()
@@ -155,8 +157,8 @@ def main():
             optimizer.zero_grad()
             optimizer_classifier.zero_grad()
             exp_average_loss = loss.item() if exp_average_loss is None else 0.7*exp_average_loss+0.3*loss.item()
-            # tqdm_bar.update(1)
-            # tqdm_bar.set_postfix(loss=exp_average_loss,correct=accuracy)
+            tqdm_bar.update(1)
+            tqdm_bar.set_postfix(loss=exp_average_loss,correct=accuracy)
 
         accuracy/=len(gpt_train)
         print("Accuracy for epoch {} is {}.\t Average loss:{}".format(epo,accuracy,exp_average_loss))
@@ -166,7 +168,8 @@ def main():
         print("Eval accuracy: {}".format(eval_accuracy))
         eval_losses.append(eval_accuracy)
 
-        if eval_accuracy < max_eval_accuracy:
+        # if eval_accuracy < max_eval_accuracy:
+        if False:
             print("eval accuracy decreasing!")
             early_terminate_counter += 1
             if early_terminate_counter > 10:

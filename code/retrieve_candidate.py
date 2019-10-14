@@ -139,7 +139,7 @@ def main():
     parser.add_argument('--keyword', action='store_true')
     parser.add_argument('--special_input', type=str, default='x_y_meta')
     parser.add_argument('--first_K_tokens', type=int, default=1024)
-    parser.add_argument('--num_turns', type=int, default=5)
+    # parser.add_argument('--num_turns', type=int, default=5)
 
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
@@ -155,9 +155,9 @@ def main():
     # tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     print('Model loaded.')
 
-    pickle_handler = open('../data_processed/x_y_meta', 'rb')
+    pickle_handler = open('../data_processed/x_y_meta_10turn', 'rb')
     x_y_meta = pickle.load(pickle_handler)
-    gpt_data = GptDataset_nli(x_y_meta, tokenizer, augment=False)
+    gpt_data = GptDataset_nli(x_y_meta, tokenizer, augment=False, num_turns=10)
 
     doc_responses, doc_utterances = get_doc_utterance(files)
     tf_idf, tf, idf, word2index, index2word = get_tfidf(files, doc_utterances)
@@ -170,8 +170,7 @@ def main():
         response_candidates = doc_responses[top_k_idx]
 
         candidate_score = []
-        candidates = list(zip(response_candidates, [y] * len(response_candidates), [0] * len(response_candidates)))
-        # gpt_data.premise_encoded,gpt_data.hypothesis_encoded,gpt_data.label = gpt_data._split(candidates)
+        candidates = list(zip([x] * len(response_candidates), response_candidates, [0] * len(response_candidates)))
         gpt_data.x_encoded, gpt_data.y_encoded, gpt_data.label = gpt_data._split(candidates)
         data_loader = DataLoader(dataset=gpt_data, batch_size=1, shuffle=False, drop_last=False,
                                  collate_fn=collate_fn_nli)
@@ -180,10 +179,11 @@ def main():
                 candidate_score.append(float('-inf'))
                 continue
             loss, logits = model(token_x, position_ids=pos_x, token_type_ids=type_x, labels=label)  # [batch,class]
-            candidate_score.append(logits[:, 1].item())  # does not support batch
+            # candidate_score.append(logits[:, 1].item())  # does not support batch
+            candidate_score.append(torch.softmax(logits, 1)[:, 1].item())
         if len(candidate_score) > 0:
-            x_aug = response_candidates[np.argmax(candidate_score)]
-            x_y_meta_aug.append([x, y, meta, x_aug])
+            y_aug = response_candidates[np.argmax(candidate_score)]
+            x_y_meta_aug.append([x, y, meta, y_aug])
     with open('../data_processed/x_y_meta_aug', 'wb') as f:
         pickle.dump(x_y_meta_aug, f)
 

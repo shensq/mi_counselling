@@ -35,7 +35,7 @@ def get_data(args, tokenizer, split_size):
         print("Using augmented data")
         pickle_handler = open('../data_processed/x_y_meta_aug', 'rb')
         x_y_meta = pickle.load(pickle_handler)
-        gpt_data = GptDataset_aug(x_y_meta, tokenizer)
+        gpt_data = GptDataset_aug(x_y_meta, tokenizer, num_turns=args.num_turns)
     elif args.keyword:
         print("Using keyword cross attention")
         pickle_handler = open('../data_processed/x_y_meta_keyword', 'rb')
@@ -160,7 +160,7 @@ def main():
 
     model, tokenizer = load_model(args)
     # =============== Load & process data ==============
-    split_size = {'train': 0.8, 'test': 0.1, 'val': 0.05}
+    split_size = {'train': 0.85, 'test': 0.1, 'val': 0.05}
     data_loader, val_loader = get_data(args, split_size=split_size, tokenizer=tokenizer)
     # ========== Prepare optimizer =============
     # the gpt2 model from library has unnamed LM head. LM head's weights are tied to input embedding
