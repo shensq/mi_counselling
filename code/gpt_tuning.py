@@ -31,7 +31,16 @@ def get_data(args, tokenizer, split_size):
     :return data_loader: The data loader for the training set.
     :return val_loader: The data loader for the validation set.
     """
-    if args.augment:
+    if args.special_input:
+        print("Using mutated data.")
+        pickle_handler = open('../data_processed/' + args.special_input, 'rb')
+        x_y_meta = pickle.load(pickle_handler)
+        if args.augment:
+            print("testing keywords with augment loader.")
+            gpt_data = GptDataset_aug(x_y_meta, tokenizer, num_turns=args.num_turns)
+        else:
+            gpt_data = GptDataset(x_y_meta, tokenizer, args.output_dir, num_turns=args.num_turns)
+    elif args.augment:
         print("Using augmented data")
         pickle_handler = open('../data_processed/x_y_meta_aug', 'rb')
         x_y_meta = pickle.load(pickle_handler)
@@ -41,11 +50,6 @@ def get_data(args, tokenizer, split_size):
         pickle_handler = open('../data_processed/x_y_meta_keyword', 'rb')
         x_y_meta = pickle.load(pickle_handler)
         gpt_data = GptDataset_keyword(x_y_meta, tokenizer)
-    elif args.special_input:
-        print("Using mutated data.")
-        pickle_handler = open('../data_processed/' + args.special_input, 'rb')
-        x_y_meta = pickle.load(pickle_handler)
-        gpt_data = GptDataset(x_y_meta, tokenizer, args.output_dir, num_turns=args.num_turns)
     else:
         print("Using vanilla data.")
         pickle_handler = open('../data_processed/x_y_meta', 'rb')

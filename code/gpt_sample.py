@@ -197,24 +197,48 @@ def load_model_data(args):
     # ========== Prepare lexicon =============
     value2word, word2value = values_lexicon_encode(path='../data_processed/values_lexicon/values_lexicon.txt',tokenizer=tokenizer)
     # =============== Load & process data ==============
-    if args.augment:
-        print("Using augmented data.")
-        pickle_handler = open('../data_processed/x_y_meta_aug','rb')
+    # if args.augment:
+    #     print("Using augmented data.")
+    #     pickle_handler = open('../data_processed/x_y_meta_aug','rb')
+    #     x_y_meta = pickle.load(pickle_handler)
+    #     gpt_data = GptDataset_aug(x_y_meta,tokenizer,num_turns=args.num_turns) # use the name of output, it is depend on how is the trained model
+    # elif args.keyword:
+    #     print("Using keyword cross attention")
+    #     pickle_handler = open('../data_processed/x_y_meta_keyword', 'rb')
+    #     # pickle_handler = open('/Users/shensq/Google Drive/Research/mi_counselling/data_processed/x_y_meta_keyword', 'rb')
+    #     x_y_meta = pickle.load(pickle_handler)
+    #     gpt_data = GptDataset_keyword(x_y_meta, tokenizer)
+    # else:
+    #     if args.special_input:
+    #         pickle_handler = open('../data_processed/'+args.special_input, 'rb')
+    #     else:
+    #         pickle_handler = open('../data_processed/x_y_meta', 'rb')
+    #     x_y_meta = pickle.load(pickle_handler)
+    #     gpt_data = GptDataset(x_y_meta,tokenizer,args.output_dir, num_turns=args.num_turns) # use the output model name as pattern name
+    if args.special_input:
+        print("Using customed data.")
+        pickle_handler = open('../data_processed/' + args.special_input, 'rb')
         x_y_meta = pickle.load(pickle_handler)
-        gpt_data = GptDataset_aug(x_y_meta,tokenizer,num_turns=args.num_turns) # use the name of output, it is depend on how is the trained model
+        if args.augment:
+            print("testing keywords with augment loader.")
+            gpt_data = GptDataset_aug(x_y_meta, tokenizer, num_turns=args.num_turns)
+        else:
+            gpt_data = GptDataset(x_y_meta, tokenizer, args.output_dir, num_turns=args.num_turns)
+    elif args.augment:
+        print("Using augmented data")
+        pickle_handler = open('../data_processed/x_y_meta_aug', 'rb')
+        x_y_meta = pickle.load(pickle_handler)
+        gpt_data = GptDataset_aug(x_y_meta, tokenizer, num_turns=args.num_turns)
     elif args.keyword:
         print("Using keyword cross attention")
         pickle_handler = open('../data_processed/x_y_meta_keyword', 'rb')
-        # pickle_handler = open('/Users/shensq/Google Drive/Research/mi_counselling/data_processed/x_y_meta_keyword', 'rb')
         x_y_meta = pickle.load(pickle_handler)
         gpt_data = GptDataset_keyword(x_y_meta, tokenizer)
     else:
-        if args.special_input:
-            pickle_handler = open('../data_processed/'+args.special_input, 'rb')
-        else:
-            pickle_handler = open('../data_processed/x_y_meta', 'rb')
+        print("Using vanilla data.")
+        pickle_handler = open('../data_processed/x_y_meta', 'rb')
         x_y_meta = pickle.load(pickle_handler)
-        gpt_data = GptDataset(x_y_meta,tokenizer,args.output_dir, num_turns=args.num_turns) # use the output model name as pattern name
+        gpt_data = GptDataset(x_y_meta, tokenizer, args.output_dir, num_turns=args.num_turns)
 
     print("Dataset initialized.")
     test_size  = int(len(gpt_data)*0.10)

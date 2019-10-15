@@ -97,6 +97,29 @@ class GptDataset(Dataset):
     def __len__(self):
         return len(self.x_encoded)
 
+# class GptDataset_keyword(Dataset):
+#     def _split(self,x_y_meta):
+#         x_all = []
+#         y_all = []
+#         meta_all = []
+#         aug_all = []
+#         for x,y,meta,aug in x_y_meta:
+#             meta_all.append(meta)
+#             x_all.append([self.tokenizer.encode(text_standardize(x_i)) for x_i in x])
+#             y_all.append(self.tokenizer.encode(text_standardize(y)))
+#             key_word.append(self.tokenizer.encode(text_standardize(aug)))
+
+#         return x_all,y_all,meta_all,aug_all
+
+#     def __init__(self,x_y_meta,tokenizer,num_turns=5):
+#         self.x_y_meta = x_y_meta
+#         self.num_turns = num_turns
+#         self.tokenizer = tokenizer
+#         self.x_encoded,self.y_encoded,self.meta,self.aug_encoded = self._split(x_y_meta)
+#         self.ref_start, self.speaker1,self.speaker2,self.eos = 2,3,4,50256
+#         self.augment = 5
+#         self.keyword = 10 # '+'
+
 class GptDataset_aug(Dataset):
     def _split(self,x_y_meta):
         x_all = []
