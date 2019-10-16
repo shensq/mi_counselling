@@ -146,6 +146,7 @@ def main():
 
     filepath = '../data/datasetMI_real_standardized/annotations/'
     files = glob.glob(filepath + '[1-9m]*.txt')
+    file_index = dict([(f[48:],i) for i,f in enumerate(files)])
     model_dir = '../models/' + args.model_dir
     model = GPT2ClassHeadsModel.from_pretrained(model_dir)
     # model = GPT2ClassHeadsModel.from_pretrained('gpt2')
@@ -166,6 +167,8 @@ def main():
     for x, y, meta in tqdm(x_y_meta):
         query_tfidf = get_sentence_tfidf(x, word2index, idf)
         doc_score = tf_idf.T.dot(query_tfidf).reshape(len(files))
+        doc_score[file_index[meta[0]]] = 0
+
         top_k_idx = np.argsort(-doc_score)[0]  # pick only one doc
         response_candidates = doc_responses[top_k_idx]
 
